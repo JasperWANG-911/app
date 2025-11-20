@@ -1,56 +1,250 @@
 import SwiftUI
+import PhotosUI
 
-// 1. 地图上的头像气泡
+// MARK: - 1. 地图上的气泡 (Annotation)
 struct PostAnnotationView: View {
-    var color: Color
+    var color: UIColor // 接收 UIColor
     var icon: String
     
     var body: some View {
         ZStack {
-            // 针尖
             Image(systemName: "triangle.fill")
-                .resizable().frame(width: 12, height: 10)
-                .foregroundStyle(.white).rotationEffect(.degrees(180))
-                .offset(y: 26).shadow(radius: 2)
-            // 白底
-            Circle().fill(.white).frame(width: 46, height: 46).shadow(radius: 4)
-            // 彩色芯
-            Circle().fill(color.gradient).frame(width: 38, height: 38)
-                .overlay(Image(systemName: icon).foregroundStyle(.white).font(.caption).bold())
+                .resizable()
+                .frame(width: 12, height: 10)
+                .foregroundStyle(.white)
+                .rotationEffect(.degrees(180))
+                .offset(y: 26)
+                .shadow(radius: 2)
+            
+            Circle()
+                .fill(.white)
+                .frame(width: 46, height: 46)
+                .shadow(radius: 4)
+            
+            Circle()
+                .fill(Color(color).gradient)
+                .frame(width: 38, height: 38)
+                .overlay(
+                    Image(systemName: icon)
+                        .foregroundStyle(.white)
+                        .font(.caption)
+                        .bold()
+                )
         }
-        .offset(y: -26) // 修正偏移量
+        .offset(y: -26)
     }
 }
 
-// 2. 底部输入卡片
+// MARK: - 2. 发帖卡片 (PostInputCard) (回溯到单图)
 struct PostInputCard: View {
-    @Binding var text: String
-    var onCancel: () -> Void
-    var onPost: () -> Void
+    @Bindable var viewModel: HomeViewModel
     
     var body: some View {
-        VStack(spacing: 16) {
-            HStack {
-                Text("New Drop").font(.headline)
-                Spacer()
-                Button(action: onCancel) {
-                    Image(systemName: "xmark.circle.fill").font(.title2).foregroundStyle(.gray.opacity(0.5))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                
+                // --- 顶部标题栏 ---
+                HStack {
+                    Text("New Drop").font(.title2).bold()
+                    Spacer()
+                    Button(action: { viewModel.cancelPost() }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(.gray.opacity(0.4))
+                    }
                 }
+                
+                // --- 1. 种类选择 ---
+                Text("Type").font(.caption).foregroundStyle(.gray)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(PostCategory.allCases) { category in
+                            CategoryPill(
+                                category: category,
+                                isSelected: viewModel.inputCategory == category,
+                                onTap: { viewModel.inputCategory = category }
+                            )
+                        }
+                    }
+                }
+                
+                Divider()
+                
+                // --- 2. 标题与内容 ---
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Details").font(.caption).foregroundStyle(.gray)
+                    
+                    TextField("Title (e.g. Great Coffee)", text: $viewModel.inputTitle)
+                        .font(.headline)
+                        .padding(12)
+                        .background(Color(UIColor.secondarySystemBackground))
+                        .cornerRadius(12)
+                    
+                    TextField("What's happening here?", text: $viewModel.inputCaption, axis: .vertical)
+                        .lineLimit(3...6)
+                        .padding(12)
+                        .background(Color(UIColor.secondarySystemBackground))
+                        .cornerRadius(12)
+                }
+                
+                // --- 3. 图片上传 (单图) ---
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Photo (Optional)").font(.caption).foregroundStyle(.gray)
+                    
+                    PhotosPicker(selection: $viewModel.imageSelection, matching: .images) {
+                        Group {
+                            if let image = viewModel.selectedImage {
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                            } else {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color(UIColor.secondarySystemBackground).opacity(0.5))
+                                    .overlay(
+                                        Image(systemName: "photo.badge.plus").foregroundStyle(.gray)
+                                    )
+                            }
+                        }
+                        .frame(height: 120)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+                
+                Spacer(minLength: 20)
+                
+                // --- 4. 发布按钮 ---
+                Button(action: { viewModel.submitPost() }) {
+                    Text("Post Drop")
+                        .bold()
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(canSubmit ? Color.black : Color.gray.opacity(0.3))
+                        .foregroundStyle(.white)
+                        .cornerRadius(16)
+                }
+                .disabled(!canSubmit)
             }
-            TextField("这里发生了什么？", text: $text)
-                .textFieldStyle(.roundedBorder)
-            
-            Button(action: onPost) {
-                Text("发布").bold().frame(maxWidth: .infinity).padding()
-                    .background(text.isEmpty ? Color.gray.opacity(0.3) : Color.purple)
-                    .foregroundStyle(.white).cornerRadius(12)
-            }
-            .disabled(text.isEmpty)
+            .padding(24)
         }
-        .padding(24)
         .background(.white)
         .clipShape(RoundedRectangle(cornerRadius: 24))
-        .shadow(radius: 20)
-        .padding(.horizontal).padding(.bottom, 20)
+        .shadow(color: .black.opacity(0.1), radius: 20)
+    }
+    
+    var canSubmit: Bool {
+        return !viewModel.inputTitle.isEmpty
+    }
+}
+
+// MARK: - 3. 帖子详情卡片 (PostDetailCard) (回溯到单图)
+struct PostDetailCard: View {
+    let post: Post
+    var onDismiss: () -> Void
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            
+            // 1. 图片区域 (单图)
+            ZStack(alignment: .topTrailing) {
+                if let filename = post.imageFilename, // 检查单个文件名
+                   let image = DataManager.shared.loadImage(filename: filename) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(height: 300)
+                } else {
+                    Rectangle()
+                        .fill(Color(post.color).gradient)
+                        .frame(height: 200)
+                        .overlay(
+                            Image(systemName: post.icon)
+                                .font(.system(size: 60))
+                                .foregroundStyle(.white.opacity(0.5))
+                        )
+                }
+                
+                // 关闭按钮
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.headline)
+                        .foregroundStyle(.black)
+                        .padding(8)
+                        .background(.white.opacity(0.8))
+                        .clipShape(Circle())
+                }
+                .padding(16)
+            }
+            
+            // 2. 内容区域
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    HStack(spacing: 4) { // 分类标签
+                        Image(systemName: post.icon)
+                        Text(post.category.rawValue)
+                    }
+                    .font(.caption.bold())
+                    .foregroundStyle(.white)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 12)
+                    .background(Capsule().fill(Color(post.color)))
+                    
+                    Spacer()
+                    
+                    Text("Just now").font(.caption).foregroundStyle(.gray)
+                }
+                
+                Text(post.title).font(.title2).bold()
+                
+                Text(post.caption).font(.body).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                
+                Divider().padding(.vertical, 8)
+                
+                // 底部作者栏 (模拟)
+                HStack {
+                    Circle().fill(Color(UIColor.secondarySystemBackground)).frame(width: 40, height: 40)
+                        .overlay(Image(systemName: "person.fill").foregroundStyle(.gray))
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Posted by Jason").font(.subheadline).bold()
+                        Text("UCL Student").font(.caption).foregroundStyle(.gray)
+                    }
+                    
+                    Spacer()
+                    
+                    Button(action: { print("Like") }) {
+                        Image(systemName: "heart").font(.title2).foregroundStyle(.black)
+                    }
+                }
+            }
+            .padding(24)
+            .background(Color.white)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .shadow(color: .black.opacity(0.2), radius: 20, y: 10)
+        .padding(.horizontal)
+        .padding(.bottom, 40)
+    }
+}
+
+// MARK: - 4. 辅助组件：分类药丸 (CategoryPill 保持不变)
+struct CategoryPill: View {
+    let category: PostCategory
+    let isSelected: Bool
+    let onTap: () -> Void
+    
+    var body: some View {
+        Button(action: onTap) {
+            HStack {
+                Image(systemName: category.icon)
+                Text(category.rawValue)
+            }
+            .font(.subheadline.bold())
+            .padding(.vertical, 10)
+            .padding(.horizontal, 16)
+            .background(isSelected ? Color(category.color) : Color(UIColor.secondarySystemBackground))
+            .foregroundStyle(isSelected ? .white : .gray)
+            .clipShape(Capsule())
+        }
     }
 }
