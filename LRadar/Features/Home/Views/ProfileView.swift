@@ -61,15 +61,28 @@ struct ProfileView: View {
                                 LazyVGrid(columns: columns, spacing: 2) {
                                     ForEach(viewModel.posts.prefix(6)) { post in
                                         ZStack {
-                                            // 尝试加载第一张图
-                                            if let filename = post.imageFilenames.first,
+                                            // 1. 云端图片
+                                            if let urlString = post.imageURLs.first, let url = URL(string: urlString) {
+                                                AsyncImage(url: url) { image in
+                                                    image
+                                                        .resizable()
+                                                        .scaledToFill()
+                                                } placeholder: {
+                                                    Color.gray.opacity(0.1)
+                                                }
+                                                .frame(width: (UIScreen.main.bounds.width - 4) / 3, height: (UIScreen.main.bounds.width - 4) / 3)
+                                                .clipped()
+                                            }
+                                            // 2. 本地图片
+                                            else if let filename = post.imageFilenames.first,
                                                let image = DataManager.shared.loadImage(filename: filename) {
                                                 Image(uiImage: image)
                                                     .resizable().scaledToFill()
                                                     .frame(width: (UIScreen.main.bounds.width - 4) / 3, height: (UIScreen.main.bounds.width - 4) / 3)
                                                     .clipped()
-                                            } else {
-                                                // 无图时的占位
+                                            }
+                                            // 3. 默认占位
+                                            else {
                                                 Rectangle().fill(Color(post.color).gradient)
                                                     .frame(width: (UIScreen.main.bounds.width - 4) / 3, height: (UIScreen.main.bounds.width - 4) / 3)
                                                     .overlay(

@@ -155,7 +155,40 @@ struct PostDetailCard: View {
             
             // 图片轮播区域
             ZStack(alignment: .topTrailing) {
-                if !post.imageFilenames.isEmpty {
+                if !post.imageURLs.isEmpty {
+                    TabView {
+                        ForEach(post.imageURLs, id: \.self) { urlString in
+                            // 使用 AsyncImage 加载网络图片
+                            AsyncImage(url: URL(string: urlString)) { phase in
+                                switch phase {
+                                case .empty:
+                                    ZStack {
+                                        Color.gray.opacity(0.1)
+                                        ProgressView()
+                                    }
+                                case .success(let image):
+                                    image
+                                        .resizable()
+                                        .scaledToFill()
+                                case .failure:
+                                    ZStack {
+                                        Color.gray.opacity(0.1)
+                                        Image(systemName: "photo.badge.exclamationmark")
+                                            .foregroundStyle(.gray)
+                                    }
+                                @unknown default:
+                                    EmptyView()
+                                }
+                            }
+                            .frame(height: 300)
+                            .clipped()
+                        }
+                    }
+                    .frame(height: 300)
+                    .tabViewStyle(.page)
+                }
+                // 兼容旧数据：如果没有 URL 但有本地文件名
+                else if !post.imageFilenames.isEmpty {
                     TabView {
                         ForEach(post.imageFilenames, id: \.self) { filename in
                             if let image = DataManager.shared.loadImage(filename: filename) {
@@ -169,7 +202,9 @@ struct PostDetailCard: View {
                     }
                     .frame(height: 300)
                     .tabViewStyle(.page)
-                } else {
+                }
+                // 既没 URL 也没本地图 -> 显示默认背景
+                else {
                     Rectangle()
                         .fill(Color(post.color).gradient)
                         .frame(height: 200)

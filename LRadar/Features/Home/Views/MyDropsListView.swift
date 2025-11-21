@@ -17,15 +17,27 @@ struct MyDropsListView: View {
                     HStack(spacing: 16) {
                         // 左侧小图
                         ZStack {
-                            if let filename = post.imageFilenames.first,
-                               let image = DataManager.shared.loadImage(filename: filename) {
+                            // 1. 优先尝试云端图片
+                            if let urlString = post.imageURLs.first, let url = URL(string: urlString) {
+                                AsyncImage(url: url) { image in
+                                    image.resizable().scaledToFill()
+                                } placeholder: {
+                                    Color.gray.opacity(0.1)
+                                }
+                            }
+                            // 2. 其次尝试本地图片 (兼容旧数据)
+                            else if let filename = post.imageFilenames.first,
+                                    let image = DataManager.shared.loadImage(filename: filename) {
                                 Image(uiImage: image).resizable().scaledToFill()
-                            } else {
+                            }
+                            // 3. 都没有 -> 显示默认图标
+                            else {
                                 Rectangle().fill(Color(post.color).gradient)
                                 Image(systemName: post.icon).foregroundStyle(.white)
                             }
                         }
-                        .frame(width: 60, height: 60).clipShape(RoundedRectangle(cornerRadius: 10))
+                        .frame(width: 60, height: 60)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                         
                         // 中间文字
                         VStack(alignment: .leading, spacing: 4) {

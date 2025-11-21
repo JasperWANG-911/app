@@ -1,10 +1,11 @@
 import SwiftUI
 import MapKit
 import PhotosUI
+import FirebaseAuth // 🔥 必须引入，用于获取 currentUser.uid
 
 @Observable
 class HomeViewModel {
-    // 1. 地图相机位置 (决定地图的中心点和缩放级别)
+    // MARK: - 1. 地图相机位置
     var cameraPosition: MapCameraPosition = .region(
         MKCoordinateRegion(
             center: CLLocationCoordinate2D(latitude: 51.5074, longitude: -0.1278),
@@ -12,11 +13,11 @@ class HomeViewModel {
         )
     )
     
-    // 2. 数据源
+    // MARK: - 2. 数据源
     var posts: [Post] = []
     var currentUser: UserProfile
     
-    // 3. UI 交互状态
+    // MARK: - 3. UI 交互状态
     var isSelectingMode = false
     var selectedLocation: CLLocationCoordinate2D?
     var isShowingInputSheet = false
@@ -27,7 +28,7 @@ class HomeViewModel {
     var inputCaption = ""
     var inputCategory: PostCategory = .food
     
-    // ⚠️ 修改点：支持多图选择
+    // 多图选择
     var selectedImages: [UIImage] = []
     var imageSelections: [PhotosPickerItem] = [] {
         didSet {
@@ -35,40 +36,52 @@ class HomeViewModel {
         }
     }
     
-    // 5. UI 反馈
+    // UI 反馈
     var showToast = false
     var toastMessage = ""
     
+    // 统计数据
     var myDropsCount: Int {
-            posts.filter { $0.authorID == currentUser.id }.count
-        }
-        
-    // 🔥 新增：计算当前用户所有帖子获得的总赞数
+        posts.filter { $0.authorID == currentUser.id }.count
+    }
+    
     var myTotalLikes: Int {
         posts.filter { $0.authorID == currentUser.id }
              .reduce(0) { $0 + $1.likeCount }
     }
     
-    // --- 初始化：加载本地数据 ---
+    // MARK: - 初始化
     init() {
+        // 1. 加载本地用户资料作为缓存 (防止 UI 空白)
         if let savedProfile = DataManager.shared.loadUserProfile() {
             self.currentUser = savedProfile
         } else {
+            // 默认占位符
             self.currentUser = UserProfile(
-                id: UUID().uuidString, // 🔥 给一个临时 ID
+                id: UUID().uuidString,
                 name: "New User",
                 handle: "@new_user",
                 school: "UCL",
                 major: "Undeclared",
-                bio: "Write something about yourself...",
+                bio: "Write something...",
                 rating: 5.0,
                 avatarFilename: nil
             )
         }
-        self.posts = DataManager.shared.loadPosts()
+        
+        // 2. 启动时异步拉取云端帖子
+        Task {
+            await fetchPosts()
+        }
     }
     
-    // --- 核心逻辑 ---
+    // 从云端拉取数据
+    @MainActor
+    func fetchPosts() async {
+        self.posts = await DataManager.shared.fetchPostsFromCloud()
+    }
+    
+    // MARK: - 核心交互逻辑
     
     func handleAddButtonTap() {
         activePost = nil
@@ -99,84 +112,85 @@ class HomeViewModel {
         }
     }
     
-    // 提交发布 (回溯到单图保存)
+    // MARK: - 🔥 核心功能：发帖 (云端版)
     func submitPost() {
-            guard let coord = selectedLocation else { return }
+        guard let coord = selectedLocation else { return }
+        
+        // 1. 准备数据
+        let currentTitle = inputTitle
+        let currentCaption = inputCaption
+        let currentCategory = inputCategory
+        let imagesToUpload = selectedImages
+        // 优先使用 Firebase 登录用户的 UID，没有则用本地 ID 兜底
+        let authorID = Auth.auth().currentUser?.uid ?? currentUser.id
+        
+        // 2. 立即关闭 UI，给用户“发送中”的流畅感
+        exitSelectionMode()
+        
+        // 3. 后台异步上传
+        Task(priority: .userInitiated) {
+            var uploadedURLs: [String] = []
             
-            let currentTitle = inputTitle
-            let currentCaption = inputCaption
-            let currentCategory = inputCategory
-            let imagesToSave = selectedImages // 获取当前选中的所有图片
-            
-            exitSelectionMode()
-            
-            Task(priority: .userInitiated) {
-                var savedFilenames: [String] = []
-                
-                // 循环保存每一张图片
-                for img in imagesToSave {
-                    let uniqueName = UUID().uuidString
-                    if let savedName = DataManager.shared.saveImage(img, name: uniqueName) {
-                        savedFilenames.append(savedName)
-                    }
+            // A. 循环上传每一张图片到 Firebase Storage
+            for image in imagesToUpload {
+                if let url = await DataManager.shared.uploadImage(image) {
+                    uploadedURLs.append(url)
+                    print("📸 图片上传成功: \(url)")
                 }
-                
-                // 创建帖子
-                let newPost = Post(
-                    // 1. 必须先传 authorID
-                    authorID: self.currentUser.id,
-                    
-                    // 2. 接着是标题、内容、分类 (根据 Post.swift 的定义顺序)
-                    title: currentTitle,
-                    caption: currentCaption,
-                    category: currentCategory,
-                    
-                    // 3. 然后才是经纬度
-                    latitude: coord.latitude,
-                    longitude: coord.longitude,
-                    
-                    // 4. 图片信息
-                    imageFilenames: savedFilenames,
-                    imageURLs: [], // 暂时留空，给云端预留
-                    
-                    // 5. 时间戳
-                    timestamp: Date(),
-                    
-                    // 6. 互动数据
-                    rating: 0,
-                    likeCount: 0,
-                    isLiked: false
-                )
-                
+            }
+            
+            // B. 创建 Post 对象
+            // 注意：imageFilenames 留空，数据存入 imageURLs
+            let newPost = Post(
+                authorID: authorID,
+                title: currentTitle,
+                caption: currentCaption,
+                category: currentCategory,
+                latitude: coord.latitude,
+                longitude: coord.longitude,
+                imageFilenames: [],          // 本地字段不再使用
+                imageURLs: uploadedURLs,     // ✅ 填入云端 URL
+                timestamp: Date(),
+                rating: 0,
+                likeCount: 0,
+                isLiked: false
+            )
+            
+            // C. 保存到 Firestore 数据库
+            let success = await DataManager.shared.savePostToCloud(post: newPost)
+            
+            // D. 成功后更新本地列表
+            if success {
                 await MainActor.run {
-                    self.posts.append(newPost)
-                    DataManager.shared.savePosts(self.posts)
+                    self.posts.insert(newPost, at: 0) // 插入到顶部
                     let generator = UINotificationFeedbackGenerator()
                     generator.notificationOccurred(.success)
                 }
+            } else {
+                print("❌ 发帖失败")
             }
+        }
     }
     
     func cancelPost() { exitSelectionMode() }
     
-    // 退出选点模式 & 重置表单
     func exitSelectionMode() {
-            withAnimation {
-                isSelectingMode = false
-                isShowingInputSheet = false
-                selectedLocation = nil
-                
-                inputTitle = ""
-                inputCaption = ""
-                inputCategory = .food
-                
-                selectedImages = []     // 清空图片
-                imageSelections = []    // 清空选择器
-                
-                if let userLoc = LocationManager.shared.userLocation {
-                    cameraPosition = .region(MKCoordinateRegion(center: userLoc, span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)))
-                }
+        withAnimation {
+            isSelectingMode = false
+            isShowingInputSheet = false
+            selectedLocation = nil
+            
+            inputTitle = ""
+            inputCaption = ""
+            inputCategory = .food
+            
+            selectedImages = []
+            imageSelections = []
+            
+            if let userLoc = LocationManager.shared.userLocation {
+                cameraPosition = .region(MKCoordinateRegion(center: userLoc, span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)))
             }
+        }
     }
     
     func closePostDetail() {
@@ -200,25 +214,24 @@ class HomeViewModel {
         }
     }
     
-    // --- 辅助方法 (回溯到单图加载) ---
+    // MARK: - 辅助方法
+    
     private func loadSelectedImages() {
-            selectedImages = []
-            guard !imageSelections.isEmpty else { return }
-            
-            Task {
-                var loadedImages: [UIImage] = []
-                
-                for item in imageSelections {
-                    if let data = try? await item.loadTransferable(type: Data.self),
-                       let uiImage = UIImage(data: data) {
-                        loadedImages.append(uiImage)
-                    }
-                }
-                
-                await MainActor.run {
-                    self.selectedImages = loadedImages
+        selectedImages = []
+        guard !imageSelections.isEmpty else { return }
+        
+        Task {
+            var loadedImages: [UIImage] = []
+            for item in imageSelections {
+                if let data = try? await item.loadTransferable(type: Data.self),
+                   let uiImage = UIImage(data: data) {
+                    loadedImages.append(uiImage)
                 }
             }
+            await MainActor.run {
+                self.selectedImages = loadedImages
+            }
+        }
     }
     
     func updateUserProfile(_ newProfile: UserProfile) {
@@ -227,54 +240,55 @@ class HomeViewModel {
     }
     
     func updateUserAvatar(_ image: UIImage) {
+        // 目前头像还是本地保存，后续可以参考 uploadImage 改为上传
         let filename = DataManager.shared.saveImage(image, name: "avatar_\(UUID().uuidString)")
-        
         var updatedProfile = currentUser
         updatedProfile.avatarFilename = filename
         updateUserProfile(updatedProfile)
     }
     
+    // MARK: - 点赞与删除 (已适配云端)
+    
     func toggleLike(for post: Post) {
-            // 在数组中找到对应的帖子索引
-            if let index = posts.firstIndex(where: { $0.id == post.id }) {
-                // 切换点赞状态
-                posts[index].isLiked.toggle()
-                // 更新数字
-                if posts[index].isLiked {
-                    posts[index].likeCount += 1
-                } else {
-                    posts[index].likeCount = max(0, posts[index].likeCount - 1)
-                }
-                
-                // 如果当前正在查看这张卡片，也需要同步更新 activePost，否则 UI 不会立即变化
-                if activePost?.id == post.id {
-                    activePost = posts[index]
-                }
-                
-                // 保存到本地
-                DataManager.shared.savePosts(posts)
+        if let index = posts.firstIndex(where: { $0.id == post.id }) {
+            // 1. 本地立即更新 UI
+            posts[index].isLiked.toggle()
+            if posts[index].isLiked {
+                posts[index].likeCount += 1
+            } else {
+                posts[index].likeCount = max(0, posts[index].likeCount - 1)
+            }
+            
+            // 同步更新当前详情页
+            if activePost?.id == post.id {
+                activePost = posts[index]
+            }
+            
+            // 2. 异步保存单个帖子到云端
+            Task {
+                _ = await DataManager.shared.savePostToCloud(post: posts[index])
             }
         }
-        
+    }
+    
     func deletePost(_ post: Post) {
         if let index = posts.firstIndex(where: { $0.id == post.id }) {
-            // 1. 从数组移除
+            // 1. 本地移除
             posts.remove(at: index)
             
-            // 2. 如果当前正在看这个帖子，关闭详情页
+            // 2. 如果正在看这个帖子，关闭详情
             if activePost?.id == post.id {
                 closePostDetail()
             }
             
-            // 3. 保存更新后的数组
-            DataManager.shared.savePosts(posts)
+            // 3. 云端删除
+            DataManager.shared.deletePostFromCloud(post: post)
             
-            // 4. 反馈震动
+            // 4. 反馈
             let generator = UINotificationFeedbackGenerator()
             generator.notificationOccurred(.success)
         }
     }
-    
     
     func focusOnUserLocation(_ coordinate: CLLocationCoordinate2D) {
         withAnimation(.spring(duration: 1.0)) {
