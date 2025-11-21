@@ -1,7 +1,8 @@
 import SwiftUI
 import MapKit
 import PhotosUI
-import FirebaseAuth // 🔥 必须引入
+import FirebaseAuth
+import FirebaseFirestore
 
 @Observable
 class HomeViewModel {
@@ -17,6 +18,19 @@ class HomeViewModel {
     var posts: [Post] = []
     var currentUser: UserProfile
     
+    // 🔥 新增：用于管理实时监听器
+    private var postsListener: ListenerRegistration?
+    
+    // 🔥 新增：本地记录“我点过赞的帖子ID”，防止云端数据覆盖本地状态
+    // 我们只信任本地的 isLiked 状态，云端的 likeCount 仅作参考
+    private var myLikedPostIDs: Set<String> = [] {
+        didSet {
+            // 每次变化都存入 UserDefaults
+            let array = Array(myLikedPostIDs)
+            UserDefaults.standard.set(array, forKey: "MyLikedPostIDs")
+        }
+    }
+    
     // MARK: - 3. UI 交互状态
     var isSelectingMode = false
     var selectedLocation: CLLocationCoordinate2D?
@@ -27,6 +41,7 @@ class HomeViewModel {
     var inputTitle = ""
     var inputCaption = ""
     var inputCategory: PostCategory = .food
+    var inputRating: Int = 0 // 🔥 新增：评分输入 (0-5)
     
     // 多图选择
     var selectedImages: [UIImage] = []
@@ -40,15 +55,15 @@ class HomeViewModel {
     var showToast = false
     var toastMessage = ""
     
-    // 🔥 核心修复：确保筛选 ID 的一致性
-    // 使用计算属性动态获取当前登录的真实 UID，而不是依赖可能过期的 currentUser.id
+    // MARK: - 4. 计算属性
+    
+    // 动态获取当前登录的真实 UID
     var currentUserID: String {
         Auth.auth().currentUser?.uid ?? currentUser.id
     }
     
     var myDrops: [Post] {
-        // 过滤出 authorID 等于当前真实 UID 的帖子
-        posts.filter { $0.authorID == currentUserID }
+        posts.filter { $0.authorID == currentUserID } // 👈 必须有这一行
             .sorted { $0.timestamp > $1.timestamp }
     }
 
@@ -60,10 +75,14 @@ class HomeViewModel {
         myDrops.reduce(0) { $0 + $1.likeCount }
     }
 
-    
-    // MARK: - 初始化
+    // MARK: - 初始化与析构
     init() {
-        // 1. 加载本地用户资料作为缓存
+        // 1. 加载本地点赞记录
+        if let savedIDs = UserDefaults.standard.array(forKey: "MyLikedPostIDs") as? [String] {
+            self.myLikedPostIDs = Set(savedIDs)
+        }
+        
+        // 2. 加载本地缓存的用户资料
         if let savedProfile = DataManager.shared.loadUserProfile() {
             self.currentUser = savedProfile
         } else {
@@ -79,21 +98,49 @@ class HomeViewModel {
             )
         }
         
-        // 2. 启动时异步拉取云端数据
+        // 3. 启动实时监听 (替代原来的 fetchPosts)
+        startListeningToPosts()
+        
+        // 4. 刷新用户资料
         Task {
-            await fetchPosts()
-            await refreshCurrentUser() // 🔥 新增：确保用户信息也是最新的
+            await refreshCurrentUser()
         }
     }
     
-    @MainActor
-    func fetchPosts() async {
-        // 拉取并过滤掉可能的坏数据
-        let cloudPosts = await DataManager.shared.fetchPostsFromCloud()
-        self.posts = cloudPosts.filter { !$0.authorID.isEmpty } // 简单过滤
+    deinit {
+        postsListener?.remove()
     }
     
-    // 🔥 新增：刷新当前用户信息
+    // MARK: - 🔥 核心功能：实时监听
+    func startListeningToPosts() {
+        // 移除旧监听
+        postsListener?.remove()
+        
+        // 开启新监听
+        postsListener = DataManager.shared.listenToPosts { [weak self] cloudPosts in
+            guard let self = self else { return }
+            
+            // ⚡️ 合并逻辑：信任云端的内容(标题、图片、点赞数)，但只信任本地的 isLiked 状态
+            let mergedPosts = cloudPosts.map { post -> Post in
+                var newPost = post
+                // 强制用本地记录覆盖云端的 isLiked
+                newPost.isLiked = self.myLikedPostIDs.contains(post.id.uuidString)
+                return newPost
+            }
+            
+            DispatchQueue.main.async {
+                self.posts = mergedPosts.filter { !$0.authorID.isEmpty }
+                
+                // 如果当前打开了详情页，也要实时更新详情页里的数据 (比如点赞数变了)
+                if let activeID = self.activePost?.id,
+                   let updatedActivePost = self.posts.first(where: { $0.id == activeID }) {
+                    self.activePost = updatedActivePost
+                }
+            }
+        }
+    }
+    
+    // 🔥 刷新当前用户信息
     @MainActor
     func refreshCurrentUser() async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
@@ -134,53 +181,67 @@ class HomeViewModel {
         }
     }
     
-    // MARK: - 🔥 核心功能：发帖
+    // MARK: - 🔥 核心功能：发帖 (并行上传 + 评分)
     func submitPost() {
         guard let coord = selectedLocation else { return }
         
+        // 暂存状态
         let currentTitle = inputTitle
         let currentCaption = inputCaption
         let currentCategory = inputCategory
+        let currentRating = Double(inputRating) // 🔥 获取评分
         let imagesToUpload = selectedImages
-        
-        // 🔥 关键：使用统一的 currentUserID
         let authorID = self.currentUserID
         
         exitSelectionMode()
         
         Task(priority: .userInitiated) {
-            var uploadedURLs: [String] = []
-            
-            for image in imagesToUpload {
-                if let url = await DataManager.shared.uploadImage(image) {
-                    uploadedURLs.append(url)
+            // --- 并行上传图片 ---
+            let uploadedURLs = await withTaskGroup(of: String?.self) { group -> [String] in
+                for image in imagesToUpload {
+                    group.addTask {
+                        return await DataManager.shared.uploadImage(image)
+                    }
                 }
+                
+                var urls: [String] = []
+                for await url in group {
+                    if let url = url { urls.append(url) }
+                }
+                return urls
             }
             
+            // 构建帖子
             let newPost = Post(
-                authorID: authorID, // 确保 ID 一致
+                authorID: authorID,
                 title: currentTitle,
                 caption: currentCaption,
                 category: currentCategory,
                 latitude: coord.latitude,
                 longitude: coord.longitude,
-                imageFilenames: [],
+                imageFilenames: [], // 废弃
                 imageURLs: uploadedURLs,
                 timestamp: Date(),
-                rating: 0,
+                rating: currentRating, // 🔥 写入评分
                 likeCount: 0,
                 isLiked: false
             )
             
+            // 写入数据库
             let success = await DataManager.shared.savePostToCloud(post: newPost)
             
             if success {
                 await MainActor.run {
-                    self.posts.insert(newPost, at: 0)
-                    // 强制更新一下 currentUser 的 ID，防止极端情况下 ID 不一致
+                    // 本地虽然有监听，但可以先手动插一条，让反馈更快
+                    // (监听器稍后会覆盖它，也没关系)
+                    if !self.posts.contains(where: { $0.id == newPost.id }) {
+                         self.posts.insert(newPost, at: 0)
+                    }
+                    
                     if self.currentUser.id != authorID {
                         self.currentUser.id = authorID
                     }
+                    
                     let generator = UINotificationFeedbackGenerator()
                     generator.notificationOccurred(.success)
                 }
@@ -198,9 +259,11 @@ class HomeViewModel {
             isShowingInputSheet = false
             selectedLocation = nil
             
+            // 重置表单
             inputTitle = ""
             inputCaption = ""
             inputCategory = .food
+            inputRating = 0 // 🔥 重置评分
             
             selectedImages = []
             imageSelections = []
@@ -220,8 +283,7 @@ class HomeViewModel {
         isShowingInputSheet = false
         selectedLocation = nil
         
-        // 打印一下 ID，方便调试
-        print("Jumping to post: \(post.id), Author: \(post.authorID)")
+        print("Jumping to post: \(post.id)")
         
         withAnimation { self.activePost = post }
         
@@ -258,45 +320,55 @@ class HomeViewModel {
     func updateUserProfile(_ newProfile: UserProfile) {
         self.currentUser = newProfile
         DataManager.shared.saveUserProfile(currentUser)
-        // 🔥 同步保存到云端
         DataManager.shared.saveUserProfileToCloud(profile: newProfile)
     }
     
     func updateUserAvatar(_ image: UIImage) {
-            Task(priority: .userInitiated) {
-                // 🔥 修改点：指定 folder 为 "avatars"
-                if let url = await DataManager.shared.uploadImage(image, folder: "avatars") {
-                    await MainActor.run {
-                        var updatedProfile = currentUser
-                        updatedProfile.avatarURL = url
-                        updateUserProfile(updatedProfile)
-                        print("头像已上传到 avatars 文件夹: \(url)")
-                    }
-                } else {
-                    print("头像上传失败")
+        Task(priority: .userInitiated) {
+            if let url = await DataManager.shared.uploadImage(image, folder: "avatars") {
+                await MainActor.run {
+                    var updatedProfile = currentUser
+                    updatedProfile.avatarURL = url
+                    updateUserProfile(updatedProfile)
                 }
             }
         }
+    }
     
     // MARK: - 点赞与删除
     
     func toggleLike(for post: Post) {
-        if let index = posts.firstIndex(where: { $0.id == post.id }) {
-            posts[index].isLiked.toggle()
-            if posts[index].isLiked {
-                posts[index].likeCount += 1
-            } else {
-                posts[index].likeCount = max(0, posts[index].likeCount - 1)
-            }
-            
-            if activePost?.id == post.id {
-                activePost = posts[index]
-            }
-            
-            Task {
-                _ = await DataManager.shared.savePostToCloud(post: posts[index])
-            }
+        guard let index = posts.firstIndex(where: { $0.id == post.id }) else { return }
+        
+        // 1. 切换本地状态
+        let isNowLiked = !posts[index].isLiked
+        posts[index].isLiked = isNowLiked
+        
+        // 2. 更新本地记录 (Truth Source)
+        if isNowLiked {
+            myLikedPostIDs.insert(post.id.uuidString)
+            posts[index].likeCount += 1
+        } else {
+            myLikedPostIDs.remove(post.id.uuidString)
+            posts[index].likeCount = max(0, posts[index].likeCount - 1)
         }
+        
+        // 3. 同步 UI (如果正在查看详情)
+        if activePost?.id == post.id {
+            activePost = posts[index]
+        }
+        
+        // 4. 发送请求给云端 (只更新数字)
+        let postToSave = posts[index]
+        Task {
+            // DataManager 的 savePostToCloud 会直接覆盖整个文档
+            // 更好的做法是使用 FieldValue.increment，但为了兼容现有架构，暂时这样写
+            // 由于其他客户端只读 myLikedPostIDs，所以这里把 isLiked=true/false 传上去也不会影响别人
+            _ = await DataManager.shared.savePostToCloud(post: postToSave)
+        }
+        
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
     }
     
     func deletePost(_ post: Post) {

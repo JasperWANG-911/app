@@ -82,16 +82,17 @@ struct LoginView: View {
                     // 提取邮箱前缀作为默认昵称 (例如: jasper@ucl.ac.uk -> jasper)
                     let defaultName = email.components(separatedBy: "@").first ?? "New User"
                     
+                    // 🔥 这里的参数严格对应 Post.swift 中的 UserProfile 定义
                     let newProfile = UserProfile(
-                        id: user.uid, // ⚠️ 关键：必须用 Auth 返回的 uid
+                        id: user.uid,               // 对应 var id: String
                         name: defaultName,
                         handle: "@\(defaultName)",
-                        school: "UCL", // 默认值
+                        school: "UCL",
                         major: "Undeclared",
                         bio: "New to LRadar!",
                         rating: 5.0,
                         avatarFilename: nil,
-                        avatarURL: nil
+                        avatarURL: nil              // 对应 var avatarURL: String?
                     )
                     
                     // 2. 写入 Firestore 的 'users' 集合
@@ -105,7 +106,7 @@ struct LoginView: View {
                 }
             }
         } else {
-            // 登录逻辑 (保持不变)
+            // 登录逻辑
             Auth.auth().signIn(withEmail: email, password: password) { result, error in
                 isLoading = false
                 if let error = error {

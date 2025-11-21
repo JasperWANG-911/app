@@ -1,6 +1,59 @@
 import SwiftUI
 import PhotosUI
-import FirebaseAuth // 🔥 引入 Auth 用于判断当前用户
+import FirebaseAuth
+
+// MARK: - 0. 用户信息行 (自动拉取资料)
+struct PostAuthorRow: View {
+    let userId: String
+    @State private var userProfile: UserProfile? // 暂存加载到的用户资料
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // 1. 头像部分
+            if let avatarURL = userProfile?.avatarURL, let url = URL(string: avatarURL) {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } else if phase.error != nil {
+                        Color.gray.opacity(0.3)
+                    } else {
+                        Color.gray.opacity(0.3)
+                    }
+                }
+                .frame(width: 40, height: 40)
+                .clipShape(Circle())
+            } else {
+                // 没有头像时的默认图
+                Image(systemName: "person.circle.fill")
+                    .resizable()
+                    .foregroundStyle(.gray.opacity(0.5))
+                    .frame(width: 40, height: 40)
+            }
+            
+            // 2. 文字部分
+            VStack(alignment: .leading, spacing: 2) {
+                // 名字
+                Text(userProfile?.name ?? "Loading...")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.primary)
+                
+                // 学校
+                Text(userProfile?.school ?? "UCL Student")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        // 🔥 关键：视图出现时，自动去云端查这个人是谁
+        .task {
+            if userProfile == nil {
+                userProfile = await DataManager.shared.fetchUserProfileFromCloud(userId: userId)
+            }
+        }
+    }
+}
 
 // MARK: - 1. 地图上的气泡 (Annotation)
 struct PostAnnotationView: View {
@@ -41,7 +94,30 @@ struct PostAnnotationView: View {
     }
 }
 
-// MARK: - 2. 发帖卡片 (支持多图)
+// MARK: - 2. 星星评分组件 (新增)
+struct StarRatingView: View {
+    var rating: Int             // 当前分数
+    var maxRating: Int = 5      // 满分
+    var interactive: Bool = false // 是否可交互 (输入模式)
+    var onRatingChanged: ((Int) -> Void)? = nil // 点击回调
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(1...maxRating, id: \.self) { star in
+                Image(systemName: star <= rating ? "star.fill" : "star")
+                    .font(interactive ? .title3 : .caption) // 交互模式大一点，展示模式小一点
+                    .foregroundStyle(star <= rating ? .yellow : .gray.opacity(0.3))
+                    .onTapGesture {
+                        if interactive {
+                            onRatingChanged?(star)
+                        }
+                    }
+            }
+        }
+    }
+}
+
+// MARK: - 3. 发帖卡片 (支持多图 + 评分)
 struct PostInputCard: View {
     @Bindable var viewModel: HomeViewModel
     
@@ -74,8 +150,26 @@ struct PostInputCard: View {
                 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Details").font(.caption).foregroundStyle(.gray)
+                    
                     TextField("Title (e.g. Great Coffee)", text: $viewModel.inputTitle)
                         .font(.headline).padding(12).background(Color(UIColor.secondarySystemBackground)).cornerRadius(12)
+                    
+                    // 🔥 新增：评分输入
+                    HStack {
+                        Text("Rating:")
+                            .font(.subheadline)
+                            .foregroundStyle(.gray)
+                        
+                        StarRatingView(
+                            rating: viewModel.inputRating,
+                            interactive: true,
+                            onRatingChanged: { newRating in
+                                viewModel.inputRating = newRating
+                            }
+                        )
+                    }
+                    .padding(.vertical, 4)
+                    
                     TextField("What's happening here?", text: $viewModel.inputCaption, axis: .vertical)
                         .lineLimit(3...6).padding(12).background(Color(UIColor.secondarySystemBackground)).cornerRadius(12)
                 }
@@ -134,7 +228,7 @@ struct PostInputCard: View {
     var canSubmit: Bool { !viewModel.inputTitle.isEmpty }
 }
 
-// MARK: - 3. 帖子详情卡片 (支持点赞与删除)
+// MARK: - 4. 帖子详情卡片 (支持点赞、删除 + 评分展示)
 struct PostDetailCard: View {
     let post: Post
     var onDismiss: () -> Void
@@ -143,14 +237,14 @@ struct PostDetailCard: View {
     
     @State private var showDeleteAlert = false
     
-    // 🔥 辅助计算属性：格式化相对时间
+    // 辅助计算属性：格式化相对时间
     private var timeAgo: String {
         let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full // 显示完整单词，如 "2 hours ago"
+        formatter.unitsStyle = .full
         return formatter.localizedString(for: post.timestamp, relativeTo: Date())
     }
     
-    // 🔥 辅助计算属性：判断是否是当前用户的帖子
+    // 辅助计算属性：判断是否是当前用户的帖子
     private var isMyPost: Bool {
         guard let currentUserID = Auth.auth().currentUser?.uid else { return false }
         return post.authorID == currentUserID
@@ -159,9 +253,9 @@ struct PostDetailCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             
-            // 图片轮播区域
+            // --- 1. 图片轮播区域 ---
             ZStack(alignment: .topTrailing) {
-                // 优先加载云端 URL
+                // A. 优先加载云端 URL
                 if !post.imageURLs.isEmpty {
                     TabView {
                         ForEach(post.imageURLs, id: \.self) { urlString in
@@ -188,7 +282,7 @@ struct PostDetailCard: View {
                     .frame(height: 300)
                     .tabViewStyle(.page)
                 }
-                // 兼容旧数据：本地文件名
+                // B. 兼容旧数据：本地文件名
                 else if !post.imageFilenames.isEmpty {
                     TabView {
                         ForEach(post.imageFilenames, id: \.self) { filename in
@@ -199,7 +293,7 @@ struct PostDetailCard: View {
                     }
                     .frame(height: 300).tabViewStyle(.page)
                 }
-                // 无图
+                // C. 无图占位
                 else {
                     Rectangle()
                         .fill(Color(post.color).gradient)
@@ -211,9 +305,9 @@ struct PostDetailCard: View {
                         )
                 }
                 
-                // 顶部按钮组
+                // D. 顶部悬浮按钮 (删除 & 关闭)
                 HStack {
-                    // 🔥 只有作者本人才能看到删除按钮
+                    // 只有作者本人才能看到删除按钮
                     if isMyPost {
                         Button(action: { showDeleteAlert = true }) {
                             Image(systemName: "trash.fill")
@@ -240,7 +334,7 @@ struct PostDetailCard: View {
                 .padding(16)
             }
             
-            // 文字内容区域
+            // --- 2. 文字内容区域 ---
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     HStack(spacing: 4) {
@@ -253,8 +347,20 @@ struct PostDetailCard: View {
                     .padding(.horizontal, 12)
                     .background(Capsule().fill(Color(post.color)))
                     
+                    // 🔥 新增：评分展示 (如果有分)
+                    if post.rating > 0 {
+                        Spacer().frame(width: 8) // 小间距
+                        HStack(spacing: 2) {
+                            Text(String(format: "%.1f", post.rating))
+                                .font(.caption.bold())
+                                .foregroundStyle(.yellow)
+                            StarRatingView(rating: Int(post.rating), interactive: false)
+                        }
+                    }
+                    
                     Spacer()
-                    // 🔥 动态时间显示
+                    
+                    // 动态时间显示
                     Text(timeAgo)
                         .font(.caption)
                         .foregroundStyle(.gray)
@@ -267,18 +373,9 @@ struct PostDetailCard: View {
                 
                 Divider().padding(.vertical, 8)
                 
-                // 底部用户信息栏
+                // --- 3. 底部用户信息栏 ---
                 HStack {
-                    Circle().fill(Color(UIColor.secondarySystemBackground)).frame(width: 40, height: 40)
-                        .overlay(Image(systemName: "person.fill").foregroundStyle(.gray))
-                    
-                    VStack(alignment: .leading, spacing: 2) {
-                        // 显示是否是本人
-                        Text(isMyPost ? "Posted by You" : "Posted by User")
-                            .font(.subheadline).bold()
-                        
-                        Text("UCL Student").font(.caption).foregroundStyle(.gray)
-                    }
+                    PostAuthorRow(userId: post.authorID)
                     
                     Spacer()
                     
@@ -315,7 +412,7 @@ struct PostDetailCard: View {
     }
 }
 
-// MARK: - 4. 辅助组件：分类药丸
+// MARK: - 5. 辅助组件：分类药丸
 struct CategoryPill: View {
     let category: PostCategory
     let isSelected: Bool
