@@ -18,6 +18,9 @@ class HomeViewModel {
     var posts: [Post] = []
     var currentUser: UserProfile
     
+    var hasUnreadNotifications: Bool = true // 演示用：默认显示小红点
+    var showFilterSheet: Bool = false       // 控制筛选弹窗显示
+    
     // 🔥 新增：用于管理实时监听器
     private var postsListener: ListenerRegistration?
     
@@ -41,7 +44,6 @@ class HomeViewModel {
     var inputTitle = ""
     var inputCaption = ""
     var inputCategory: PostCategory = .food
-    var inputRating: Int = 0 // 🔥 新增：评分输入 (0-5)
     
     // 多图选择
     var selectedImages: [UIImage] = []
@@ -93,7 +95,6 @@ class HomeViewModel {
                 school: "UCL",
                 major: "Undeclared",
                 bio: "Write something...",
-                rating: 5.0,
                 avatarFilename: nil
             )
         }
@@ -189,29 +190,24 @@ class HomeViewModel {
         let currentTitle = inputTitle
         let currentCaption = inputCaption
         let currentCategory = inputCategory
-        let currentRating = Double(inputRating) // 🔥 获取评分
+        // let currentRating // ❌ 已删除
         let imagesToUpload = selectedImages
         let authorID = self.currentUserID
         
         exitSelectionMode()
         
         Task(priority: .userInitiated) {
-            // --- 并行上传图片 ---
+            // ... (图片上传逻辑保持不变) ...
             let uploadedURLs = await withTaskGroup(of: String?.self) { group -> [String] in
                 for image in imagesToUpload {
-                    group.addTask {
-                        return await DataManager.shared.uploadImage(image)
-                    }
+                    group.addTask { return await DataManager.shared.uploadImage(image) }
                 }
-                
                 var urls: [String] = []
-                for await url in group {
-                    if let url = url { urls.append(url) }
-                }
+                for await url in group { if let url = url { urls.append(url) } }
                 return urls
             }
             
-            // 构建帖子
+            // 构建帖子 (注意：不再包含 rating 参数)
             let newPost = Post(
                 authorID: authorID,
                 title: currentTitle,
@@ -219,10 +215,10 @@ class HomeViewModel {
                 category: currentCategory,
                 latitude: coord.latitude,
                 longitude: coord.longitude,
-                imageFilenames: [], // 废弃
+                imageFilenames: [],
                 imageURLs: uploadedURLs,
                 timestamp: Date(),
-                rating: currentRating, // 🔥 写入评分
+                // rating: currentRating, // ❌ 已删除
                 likeCount: 0,
                 isLiked: false
             )
@@ -232,21 +228,20 @@ class HomeViewModel {
             
             if success {
                 await MainActor.run {
-                    // 本地虽然有监听，但可以先手动插一条，让反馈更快
-                    // (监听器稍后会覆盖它，也没关系)
                     if !self.posts.contains(where: { $0.id == newPost.id }) {
                          self.posts.insert(newPost, at: 0)
                     }
                     
-                    if self.currentUser.id != authorID {
-                        self.currentUser.id = authorID
-                    }
+                    // ✅ 核心修改：发帖成功，给当前用户加分！
+                    self.currentUser.reputation += 10 // 本地更新
+                    DataManager.shared.saveUserProfile(self.currentUser) // 存本地
+                    DataManager.shared.saveUserProfileToCloud(profile: self.currentUser) // 存云端
                     
                     let generator = UINotificationFeedbackGenerator()
                     generator.notificationOccurred(.success)
                 }
             } else {
-                print("❌ 发帖失败")
+                print("发帖失败")
             }
         }
     }
@@ -263,11 +258,12 @@ class HomeViewModel {
             inputTitle = ""
             inputCaption = ""
             inputCategory = .food
-            inputRating = 0 // 🔥 重置评分
+            // inputRating = 0 // ❌ 已删除：无需重置
             
             selectedImages = []
             imageSelections = []
             
+            // ... (后续代码保持不变)
             if let userLoc = LocationManager.shared.userLocation {
                 cameraPosition = .region(MKCoordinateRegion(center: userLoc, span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)))
             }

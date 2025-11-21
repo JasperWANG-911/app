@@ -10,10 +10,10 @@ struct ProfileView: View {
     // 状态控制
     @State private var isShowingEdit = false
     @State private var isShowingShare = false
-    @State private var isShowingRatingDetail = false
+    @State private var isShowingReputationDetail = false // ✅ 变量名改得更贴切
     @State private var showAllDrops = false
     
-    // 🔥 新增：控制设置页面的跳转
+    // 控制设置页面的跳转
     @State private var showSettings = false
     
     // 冻结排序 ID
@@ -31,7 +31,7 @@ struct ProfileView: View {
                         user: viewModel.currentUser,
                         onEditTap: { isShowingEdit = true },
                         onShareTap: { isShowingShare = true },
-                        onRatingTap: { isShowingRatingDetail = true }
+                        onReputationTap: { isShowingReputationDetail = true } // ✅ 传入新回调
                     )
                     
                     // 2. 数据统计
@@ -127,25 +127,19 @@ struct ProfileView: View {
             }
             .background(Color.white)
             .navigationBarTitleDisplayMode(.inline)
-            
-            // 🔥 核心修改：Toolbar 改为齿轮图标 -> 跳转 SettingsView
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: {
-                        showSettings = true
-                    }) {
-                        Image(systemName: "gearshape.fill") // 使用实心齿轮更显眼
+                    Button(action: { showSettings = true }) {
+                        Image(systemName: "gearshape.fill")
                             .foregroundStyle(.black)
                             .font(.system(size: 18, weight: .semibold))
                     }
                 }
             }
-            // 🔥 跳转逻辑
             .navigationDestination(isPresented: $showAllDrops) {
                 MyDropsListView(viewModel: viewModel, currentTab: $currentTab)
             }
             .navigationDestination(isPresented: $showSettings) {
-                // 进入设置页面，传入必要的绑定
                 SettingsView(viewModel: viewModel, isUserLoggedIn: $isUserLoggedIn)
             }
             .sheet(isPresented: $isShowingEdit) {
@@ -155,22 +149,18 @@ struct ProfileView: View {
                 })
             }
             .sheet(isPresented: $isShowingShare) {
-                ShareSheet(items: ["Check out \(viewModel.currentUser.name)'s profile!"])
+                ShareSheet(items: ["Check out \(viewModel.currentUser.name)'s profile on LRadar!"])
                     .presentationDetents([.medium])
             }
-            .sheet(isPresented: $isShowingRatingDetail) {
-                RatingBreakdownView(user: viewModel.currentUser)
+            // ✅ 显示新的声望详情页
+            .sheet(isPresented: $isShowingReputationDetail) {
+                ReputationBreakdownView(user: viewModel.currentUser)
                     .presentationDetents([.height(400)])
                     .presentationCornerRadius(24)
             }
-            // 生命周期：刷新排序
-            .onAppear {
-                refreshTopDropsOrder()
-            }
+            .onAppear { refreshTopDropsOrder() }
             .onChange(of: viewModel.myDrops.isEmpty) { _, isEmpty in
-                if !isEmpty && frozenTopIDs.isEmpty {
-                    refreshTopDropsOrder()
-                }
+                if !isEmpty && frozenTopIDs.isEmpty { refreshTopDropsOrder() }
             }
         }
     }
@@ -187,7 +177,152 @@ struct ProfileView: View {
     }
 }
 
-// MARK: - Child Views (保持不变，直接复用即可)
+// MARK: - Subviews
+
+struct ProfileHeaderView: View {
+    var user: UserProfile
+    var onEditTap: () -> Void
+    var onShareTap: () -> Void
+    var onReputationTap: () -> Void // ✅ 改名
+    
+    var formattedHandle: String {
+        let raw = user.handle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw.hasPrefix("@") ? raw : "@\(raw)"
+    }
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            Button(action: onEditTap) {
+                ZStack(alignment: .bottomTrailing) {
+                    // 头像逻辑 (保持不变)
+                    if let avatarURL = user.avatarURL, let url = URL(string: avatarURL) {
+                        AsyncImage(url: url) { phase in
+                            if let image = phase.image {
+                                image.resizable().scaledToFill()
+                            } else {
+                                Color.gray.opacity(0.1)
+                            }
+                        }
+                        .frame(width: 96, height: 96).clipShape(Circle())
+                        .overlay(Circle().stroke(Color.white, lineWidth: 4))
+                    } else if let filename = user.avatarFilename,
+                              let image = DataManager.shared.loadImage(filename: filename) {
+                        Image(uiImage: image)
+                            .resizable().scaledToFill()
+                            .frame(width: 96, height: 96).clipShape(Circle())
+                            .overlay(Circle().stroke(Color.white, lineWidth: 4))
+                    } else {
+                        Image(systemName: "person.crop.circle.fill")
+                            .resizable()
+                            .foregroundStyle(Color(UIColor.secondarySystemBackground))
+                            .frame(width: 96, height: 96).clipShape(Circle())
+                            .overlay(Circle().stroke(Color.white, lineWidth: 4))
+                    }
+                    
+                    // 🔥 核心修改：声望勋章按钮
+                    Button(action: onReputationTap) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "trophy.fill").font(.caption2).foregroundStyle(.yellow)
+                            // 显示分数
+                            Text("\(user.reputation)").font(.caption).bold().foregroundStyle(.white).monospacedDigit()
+                            // 显示头衔
+                            Text("• \(user.rankTitle)").font(.caption2).bold().foregroundStyle(.white.opacity(0.9))
+                            
+                            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.gray)
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Capsule().fill(.black))
+                        .overlay(Capsule().stroke(Color.white, lineWidth: 2))
+                    }
+                    .offset(x: 20, y: 5) // 位置稍微调整一下以适应更宽的胶囊
+                }
+            }.buttonStyle(.plain)
+            
+            VStack(spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(user.name).font(.title2).bold().foregroundStyle(.black)
+                    Text(formattedHandle).font(.subheadline).foregroundStyle(.gray)
+                }
+                HStack(spacing: 4) {
+                    Image(systemName: "graduationcap.fill").font(.caption).foregroundStyle(.gray)
+                    Text("\(user.school) · \(user.major)").font(.subheadline).foregroundStyle(.gray)
+                }
+                Text(user.bio).font(.footnote).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).padding(.horizontal, 40).padding(.top, 4)
+            }
+            
+            HStack(spacing: 12) {
+                Button(action: onEditTap) {
+                    Text("Edit Profile").font(.subheadline.bold()).frame(maxWidth: .infinity).padding(.vertical, 8)
+                        .background(Color(UIColor.secondarySystemBackground)).foregroundStyle(.black).cornerRadius(8)
+                }
+                Button(action: onShareTap) {
+                    Text("Share").font(.subheadline.bold()).frame(maxWidth: .infinity).padding(.vertical, 8)
+                        .background(Color(UIColor.secondarySystemBackground)).foregroundStyle(.black).cornerRadius(8)
+                }
+            }
+            .padding(.horizontal, 24)
+        }
+        .padding(.top, 10)
+    }
+}
+
+// 🔥 重写：声望详情页 (原 RatingBreakdownView)
+struct ReputationBreakdownView: View {
+    var user: UserProfile
+    
+    var body: some View {
+        VStack(spacing: 24) {
+            Text("Reputation Status").font(.headline).padding(.top, 20)
+            
+            // 当前等级展示
+            VStack(spacing: 8) {
+                ZStack {
+                    Circle().fill(Color.blue.opacity(0.1)).frame(width: 80, height: 80)
+                    Image(systemName: "trophy.circle.fill")
+                        .font(.system(size: 50))
+                        .foregroundStyle(.yellow.gradient)
+                }
+                
+                Text(user.rankTitle)
+                    .font(.title).bold()
+                    .foregroundStyle(.primary)
+                
+                Text("\(user.reputation) Points")
+                    .font(.title3).monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            
+            Divider()
+            
+            // 积分规则说明
+            VStack(alignment: .leading, spacing: 16) {
+                Text("How to earn points?").font(.headline)
+                
+                HStack(spacing: 12) {
+                    Image(systemName: "plus.circle.fill").font(.title2).foregroundStyle(.green)
+                    VStack(alignment: .leading) {
+                        Text("Post a new Drop").bold()
+                        Text("+10 pts").font(.caption).foregroundStyle(.gray)
+                    }
+                }
+                
+                HStack(spacing: 12) {
+                    Image(systemName: "heart.circle.fill").font(.title2).foregroundStyle(.red)
+                    VStack(alignment: .leading) {
+                        Text("Get a Like (Coming Soon)").bold()
+                        Text("+2 pts").font(.caption).foregroundStyle(.gray)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 40)
+            
+            Spacer()
+        }
+        .padding()
+    }
+}
 
 struct ProfileStatsView: View {
     let postsCount: Int
@@ -229,88 +364,6 @@ struct StatUnit: View {
     }
 }
 
-struct ProfileHeaderView: View {
-    var user: UserProfile
-    var onEditTap: () -> Void
-    var onShareTap: () -> Void
-    var onRatingTap: () -> Void
-    
-    var formattedHandle: String {
-        let raw = user.handle.trimmingCharacters(in: .whitespacesAndNewlines)
-        return raw.hasPrefix("@") ? raw : "@\(raw)"
-    }
-    
-    var body: some View {
-        VStack(spacing: 16) {
-            Button(action: onEditTap) {
-                ZStack(alignment: .bottomTrailing) {
-                    if let avatarURL = user.avatarURL, let url = URL(string: avatarURL) {
-                        AsyncImage(url: url) { phase in
-                            if let image = phase.image {
-                                image.resizable().scaledToFill()
-                            } else {
-                                Color.gray.opacity(0.1)
-                            }
-                        }
-                        .frame(width: 96, height: 96).clipShape(Circle())
-                        .overlay(Circle().stroke(Color.white, lineWidth: 4))
-                    } else if let filename = user.avatarFilename,
-                              let image = DataManager.shared.loadImage(filename: filename) {
-                        Image(uiImage: image)
-                            .resizable().scaledToFill()
-                            .frame(width: 96, height: 96).clipShape(Circle())
-                            .overlay(Circle().stroke(Color.white, lineWidth: 4))
-                    } else {
-                        Image(systemName: "person.crop.circle.fill")
-                            .resizable()
-                            .foregroundStyle(Color(UIColor.secondarySystemBackground))
-                            .frame(width: 96, height: 96).clipShape(Circle())
-                            .overlay(Circle().stroke(Color.white, lineWidth: 4))
-                    }
-                    
-                    Button(action: onRatingTap) {
-                        HStack(spacing: 3) {
-                            Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow)
-                            Text(String(format: "%.2f", user.rating)).font(.caption).bold().foregroundStyle(.white).monospacedDigit()
-                            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.gray)
-                        }
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(Capsule().fill(.black))
-                        .overlay(Capsule().stroke(Color.white, lineWidth: 2))
-                    }
-                    .offset(x: 10, y: 5)
-                }
-            }.buttonStyle(.plain)
-            
-            VStack(spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(user.name).font(.title2).bold().foregroundStyle(.black)
-                    Text(formattedHandle).font(.subheadline).foregroundStyle(.gray)
-                }
-                HStack(spacing: 4) {
-                    Image(systemName: "graduationcap.fill").font(.caption).foregroundStyle(.gray)
-                    Text("\(user.school) · \(user.major)").font(.subheadline).foregroundStyle(.gray)
-                }
-                Text(user.bio).font(.footnote).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center).padding(.horizontal, 40).padding(.top, 4)
-            }
-            
-            HStack(spacing: 12) {
-                Button(action: onEditTap) {
-                    Text("Edit Profile").font(.subheadline.bold()).frame(maxWidth: .infinity).padding(.vertical, 8)
-                        .background(Color(UIColor.secondarySystemBackground)).foregroundStyle(.black).cornerRadius(8)
-                }
-                Button(action: onShareTap) {
-                    Text("Share").font(.subheadline.bold()).frame(maxWidth: .infinity).padding(.vertical, 8)
-                        .background(Color(UIColor.secondarySystemBackground)).foregroundStyle(.black).cornerRadius(8)
-                }
-            }
-            .padding(.horizontal, 24)
-        }
-        .padding(.top, 10)
-    }
-}
-
 struct EmptyStateView: View {
     var body: some View {
         VStack(spacing: 12) {
@@ -318,23 +371,6 @@ struct EmptyStateView: View {
             Text("No drops yet").font(.subheadline).foregroundStyle(.gray)
         }
         .frame(maxWidth: .infinity).padding(.top, 40)
-    }
-}
-
-struct RatingBreakdownView: View {
-    var user: UserProfile
-    var body: some View {
-        VStack(spacing: 20) {
-            Text("Rating Breakdown").font(.headline).padding(.top, 20)
-            HStack(spacing: 20) {
-                Text(String(format: "%.1f", user.rating)).font(.system(size: 60, weight: .heavy))
-                VStack(alignment: .leading, spacing: 4) {
-                    Image(systemName: "star.fill").foregroundStyle(.yellow)
-                    Text("Based on 142 reviews").font(.caption).foregroundStyle(.gray)
-                }
-            }
-            Spacer()
-        }.padding()
     }
 }
 

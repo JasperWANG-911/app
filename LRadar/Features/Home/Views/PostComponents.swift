@@ -2,51 +2,53 @@ import SwiftUI
 import PhotosUI
 import FirebaseAuth
 
-// MARK: - 0. 用户信息行 (自动拉取资料)
+// MARK: - 0. 用户信息行 (修改：增加显示头衔)
 struct PostAuthorRow: View {
     let userId: String
-    @State private var userProfile: UserProfile? // 暂存加载到的用户资料
+    @State private var userProfile: UserProfile?
     
     var body: some View {
         HStack(spacing: 12) {
-            // 1. 头像部分
+            // 1. 头像部分 (保持不变)
             if let avatarURL = userProfile?.avatarURL, let url = URL(string: avatarURL) {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } else if phase.error != nil {
-                        Color.gray.opacity(0.3)
+                        image.resizable().aspectRatio(contentMode: .fill)
                     } else {
                         Color.gray.opacity(0.3)
                     }
                 }
-                .frame(width: 40, height: 40)
-                .clipShape(Circle())
+                .frame(width: 40, height: 40).clipShape(Circle())
             } else {
-                // 没有头像时的默认图
                 Image(systemName: "person.circle.fill")
-                    .resizable()
-                    .foregroundStyle(.gray.opacity(0.5))
+                    .resizable().foregroundStyle(.gray.opacity(0.5))
                     .frame(width: 40, height: 40)
             }
             
             // 2. 文字部分
             VStack(alignment: .leading, spacing: 2) {
-                // 名字
-                Text(userProfile?.name ?? "Loading...")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.primary)
+                // 名字 + 头衔 (新增)
+                HStack(spacing: 4) {
+                    Text(userProfile?.name ?? "Loading...")
+                        .font(.subheadline).fontWeight(.semibold)
+                        .foregroundStyle(.primary)
+                    
+                    // ✅ 新增：显示用户的声望头衔
+                    if let title = userProfile?.rankTitle {
+                        Text(title)
+                            .font(.system(size: 10, weight: .bold))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.1))
+                            .foregroundStyle(.blue)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                }
                 
-                // 学校
                 Text(userProfile?.school ?? "UCL Student")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
-        // 🔥 关键：视图出现时，自动去云端查这个人是谁
         .task {
             if userProfile == nil {
                 userProfile = await DataManager.shared.fetchUserProfileFromCloud(userId: userId)
@@ -117,7 +119,7 @@ struct StarRatingView: View {
     }
 }
 
-// MARK: - 3. 发帖卡片 (支持多图 + 评分)
+// MARK: - 3. 发帖卡片 (修改：删除了评分输入)
 struct PostInputCard: View {
     @Bindable var viewModel: HomeViewModel
     
@@ -154,26 +156,13 @@ struct PostInputCard: View {
                     TextField("Title (e.g. Great Coffee)", text: $viewModel.inputTitle)
                         .font(.headline).padding(12).background(Color(UIColor.secondarySystemBackground)).cornerRadius(12)
                     
-                    // 🔥 新增：评分输入
-                    HStack {
-                        Text("Rating:")
-                            .font(.subheadline)
-                            .foregroundStyle(.gray)
-                        
-                        StarRatingView(
-                            rating: viewModel.inputRating,
-                            interactive: true,
-                            onRatingChanged: { newRating in
-                                viewModel.inputRating = newRating
-                            }
-                        )
-                    }
-                    .padding(.vertical, 4)
+                    // ❌ 原来的 Rating 输入框已删除
                     
                     TextField("What's happening here?", text: $viewModel.inputCaption, axis: .vertical)
                         .lineLimit(3...6).padding(12).background(Color(UIColor.secondarySystemBackground)).cornerRadius(12)
                 }
                 
+                // ... (照片选择部分保持不变) ...
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Text("Photos (Max 9)").font(.caption).foregroundStyle(.gray)
@@ -183,8 +172,7 @@ struct PostInputCard: View {
                                 Image(systemName: "photo.badge.plus")
                                 Text("Add Photos")
                             }
-                            .font(.caption.bold())
-                            .foregroundStyle(.blue)
+                            .font(.caption.bold()).foregroundStyle(.blue)
                         }
                     }
                     
@@ -198,8 +186,7 @@ struct PostInputCard: View {
                             HStack(spacing: 10) {
                                 ForEach(viewModel.selectedImages, id: \.self) { img in
                                     Image(uiImage: img)
-                                        .resizable()
-                                        .scaledToFill()
+                                        .resizable().scaledToFill()
                                         .frame(width: 100, height: 100)
                                         .clipShape(RoundedRectangle(cornerRadius: 10))
                                 }
@@ -211,7 +198,7 @@ struct PostInputCard: View {
                 Spacer(minLength: 20)
                 
                 Button(action: { viewModel.submitPost() }) {
-                    Text("Post Drop")
+                    Text("Post Drop (+10 pts)") // ✅ 提示：发帖加分
                         .bold().frame(maxWidth: .infinity).padding()
                         .background(canSubmit ? Color.black : Color.gray.opacity(0.3))
                         .foregroundStyle(.white).cornerRadius(16)
@@ -228,20 +215,19 @@ struct PostInputCard: View {
     var canSubmit: Bool { !viewModel.inputTitle.isEmpty }
 }
 
-// MARK: - 4. 帖子详情卡片 (支持点赞、删除 + 评分展示 + 举报)
+// MARK: - 4. 帖子详情卡片 (修改：删除了评分展示)
 struct PostDetailCard: View {
     let post: Post
     var onDismiss: () -> Void
     var onLike: () -> Void
     var onDelete: () -> Void
-    // 这里的 onReport 我们让它带一个原因参数，方便扩展
     var onReport: (String) -> Void
     
     @State private var showDeleteAlert = false
-    @State private var showReportAlert = false // 🔥 控制举报确认弹窗
-    @State private var showToast = false       // 🔥 控制成功提示显示
+    @State private var showReportAlert = false
+    @State private var showToast = false
     
-    // 辅助计算属性
+    // ... (辅助属性 timeAgo, isMyPost 保持不变) ...
     private var timeAgo: String {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .full
@@ -252,15 +238,13 @@ struct PostDetailCard: View {
         guard let currentUserID = Auth.auth().currentUser?.uid else { return false }
         return post.authorID == currentUserID
     }
-    
+
     var body: some View {
-        ZStack(alignment: .bottom) { // 使用 ZStack 以便让 Toast 浮在上面
+        ZStack(alignment: .bottom) {
             VStack(alignment: .leading, spacing: 0) {
                 
-                // --- 1. 图片轮播区域 ---
+                // --- 1. 图片轮播 (保持不变) ---
                 ZStack(alignment: .topTrailing) {
-                    // ... (图片显示代码保持不变，省略以节省篇幅，请保留你原有的 AsyncImage/TabView 代码) ...
-                    // 这里为了演示，我只保留占位符逻辑，你记得保留原有的图片加载逻辑！
                     if !post.imageURLs.isEmpty {
                         TabView {
                             ForEach(post.imageURLs, id: \.self) { urlString in
@@ -276,7 +260,7 @@ struct PostDetailCard: View {
                             .overlay(Image(systemName: post.icon).font(.system(size: 60)).foregroundStyle(.white.opacity(0.5)))
                     }
                     
-                    // D. 顶部悬浮按钮
+                    // ... (右上角关闭/删除按钮保持不变) ...
                     HStack {
                         if isMyPost {
                             Button(action: { showDeleteAlert = true }) {
@@ -285,24 +269,17 @@ struct PostDetailCard: View {
                                     .padding(8).background(.white.opacity(0.8)).clipShape(Circle())
                             }
                         } else {
-                            // 🔥 举报入口
                             Menu {
-                                Button(role: .destructive) {
-                                    showReportAlert = true // 点击后弹出确认框
-                                } label: {
+                                Button(role: .destructive) { showReportAlert = true } label: {
                                     Label("Report Post", systemImage: "exclamationmark.bubble")
                                 }
-                                // 屏蔽功能暂时隐藏，等想好逻辑再加
-                                // Button(...) { ... }
                             } label: {
                                 Image(systemName: "ellipsis")
                                     .font(.headline).foregroundStyle(.black)
                                     .padding(8).background(.white.opacity(0.8)).clipShape(Circle())
                             }
                         }
-                        
                         Spacer()
-                        
                         Button(action: onDismiss) {
                             Image(systemName: "xmark")
                                 .font(.headline).foregroundStyle(.black)
@@ -312,9 +289,8 @@ struct PostDetailCard: View {
                     .padding(16)
                 }
                 
-                // --- 2. 文字内容区域 ---
+                // --- 2. 文字内容区域 (修改) ---
                 VStack(alignment: .leading, spacing: 12) {
-                    // ... (文字部分代码保持不变，保留你原有的 HStack/Text 逻辑) ...
                     HStack {
                         HStack(spacing: 4) {
                             Image(systemName: post.icon)
@@ -324,13 +300,8 @@ struct PostDetailCard: View {
                         .padding(.vertical, 6).padding(.horizontal, 12)
                         .background(Capsule().fill(Color(post.color)))
                         
-                        if post.rating > 0 {
-                            Spacer().frame(width: 8)
-                            HStack(spacing: 2) {
-                                Text(String(format: "%.1f", post.rating)).font(.caption.bold()).foregroundStyle(.yellow)
-                                StarRatingView(rating: Int(post.rating), interactive: false)
-                            }
-                        }
+                        // ❌ 原来的 4.5分 星星展示 已删除
+                        
                         Spacer()
                         Text(timeAgo).font(.caption).foregroundStyle(.gray)
                     }
@@ -341,7 +312,7 @@ struct PostDetailCard: View {
                     
                     Divider().padding(.vertical, 8)
                     
-                    // --- 3. 底部用户信息栏 ---
+                    // --- 3. 底部用户信息栏 (保持不变) ---
                     HStack {
                         PostAuthorRow(userId: post.authorID)
                         Spacer()
@@ -365,44 +336,34 @@ struct PostDetailCard: View {
             .padding(.horizontal)
             .padding(.bottom, 40)
             
-            // 🔥 关键：Toast 提示层
             if showToast {
-                ToastView(message: "Thanks for reporting. Admins will review shortly.")
+                ToastView(message: "Report submitted.")
                     .onAppear {
-                        // 2秒后自动消失
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
                             withAnimation { showToast = false }
                         }
                     }
             }
         }
-        // 🔥 删除确认弹窗
+        // ... (Alert 和 ConfirmationDialog 保持不变)
         .alert("Delete this Drop?", isPresented: $showDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) { onDelete() }
         } message: {
             Text("This action cannot be undone.")
         }
-        // 🔥 举报确认弹窗
         .confirmationDialog("Report this post?", isPresented: $showReportAlert, titleVisibility: .visible) {
-            Button("Inappropriate Content", role: .destructive) {
-                handleReport(reason: "Inappropriate Content")
-            }
-            Button("Spam or Scam", role: .destructive) {
-                handleReport(reason: "Spam or Scam")
-            }
+            Button("Inappropriate Content", role: .destructive) { handleReport(reason: "Inappropriate Content") }
+            Button("Spam or Scam", role: .destructive) { handleReport(reason: "Spam or Scam") }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("Please select a reason. Our team will review this report.")
+            Text("Please select a reason.")
         }
     }
     
-    // 内部处理函数：触发回调并显示 Toast
     private func handleReport(reason: String) {
-        onReport(reason) // 调用外部传入的 ViewModel 逻辑写入数据库
-        withAnimation {
-            showToast = true // 显示成功提示
-        }
+        onReport(reason)
+        withAnimation { showToast = true }
     }
 }
 

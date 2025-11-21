@@ -1,22 +1,21 @@
 import SwiftUI
 import CoreLocation
 
-// 🔥 关键修改 1: 加上 Equatable 协议，修复 ContentView 的 onChange 报错
+// MARK: - 1. 帖子模型 (Post)
 struct Post: Identifiable, Codable, Equatable {
     var id = UUID()
     var authorID: String
-    var title: String
+    var title: String       // 这是帖子的标题 (例如 "Great Coffee")
     var caption: String
     var category: PostCategory
     var latitude: Double
     var longitude: Double
     
-    // 🔥 关键修改 2: 确保有这两个图片字段，修复 DataManager 报错
-    var imageFilenames: [String] // 兼容旧数据 (本地图片)
-    var imageURLs: [String] = [] // ✅ 新增：云端图片链接 (Storage URL)
+    var imageFilenames: [String] // 兼容旧数据
+    var imageURLs: [String] = [] // 云端图片链接
     
     var timestamp: Date
-    var rating: Double // ✅ 新增：评分字段
+    
     var likeCount: Int
     var isLiked: Bool
     
@@ -25,11 +24,9 @@ struct Post: Identifiable, Codable, Equatable {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
     
-    // 辅助属性：方便 UI 调用颜色和图标
     var color: UIColor { category.color }
     var icon: String { category.icon }
     
-    // Equatable 实现 (Swift 自动合成通常够用，但显式写出来更稳妥)
     static func == (lhs: Post, rhs: Post) -> Bool {
         return lhs.id == rhs.id &&
                lhs.isLiked == rhs.isLiked &&
@@ -37,7 +34,7 @@ struct Post: Identifiable, Codable, Equatable {
     }
 }
 
-// MARK: - 帖子分类枚举
+// MARK: - 2. 帖子分类 (PostCategory)
 enum PostCategory: String, CaseIterable, Identifiable, Codable {
     case alert = "Alert"
     case food = "Foodie"
@@ -68,16 +65,28 @@ enum PostCategory: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-// MARK: - 用户资料模型
-// 🔥 关键修改 3: 确保包含 id 和 avatarURL，修复 LoginView 报错
+// MARK: - 3. 用户资料模型 (UserProfile)
 struct UserProfile: Codable, Identifiable {
-    var id: String          // 用户 UID
+    var id: String
     var name: String
     var handle: String
     var school: String
     var major: String
     var bio: String
-    var rating: Double
-    var avatarFilename: String? // 旧字段
-    var avatarURL: String?      // ✅ 新字段：云端头像链接
+    
+    var avatarFilename: String?
+    var avatarURL: String?
+    
+    // ✅ 新增：声望值 (默认 0)
+    var reputation: Int = 0
+    
+    // ✅ 新增：根据声望计算的头衔 (这里用 rankTitle 以免和帖子 title 混淆)
+    var rankTitle: String {
+        switch reputation {
+        case 0..<50: return "Freshman"
+        case 50..<200: return "Explorer"
+        case 200..<500: return "Guide"
+        default: return "Legend"
+        }
+    }
 }

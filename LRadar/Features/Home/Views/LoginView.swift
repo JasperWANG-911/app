@@ -210,9 +210,9 @@ struct LoginView: View {
                         school: detectedSchool, // ✅ 自动填入
                         major: "Undeclared",
                         bio: "New to LRadar!",
-                        rating: 5.0,
                         avatarFilename: nil,
-                        avatarURL: nil
+                        avatarURL: nil,
+                        reputation: 0
                     )
                     
                     // 2. 写入 Firestore

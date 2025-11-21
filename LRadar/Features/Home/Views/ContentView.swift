@@ -7,8 +7,6 @@ struct ContentView: View {
     
     @State private var currentTab: Tab = .map
     @State private var hasInitialCentered = false
-    
-    // 🔥 1. 新增：用于控制地图原生的选中状态
     @State private var selectedPostID: UUID?
     
     var body: some View {
@@ -18,7 +16,7 @@ struct ContentView: View {
             Group {
                 switch currentTab {
                 case .map:
-                    mapView
+                    mapView // 地图视图 (包含新增的按钮)
                 case .friends:
                     FriendsView()
                 case .profile:
@@ -160,6 +158,62 @@ struct ContentView: View {
                 }
             }
             .ignoresSafeArea()
+            
+            
+            // 🔥 新增：右上角悬浮按钮组 (Notification & Filter)
+            if !viewModel.isSelectingMode {
+                VStack {
+                    HStack {
+                        Spacer() // 挤到右边
+                        
+                        VStack(spacing: 12) {
+                            // 1. Notification 按钮
+                            Button(action: {
+                                // 点击动作：清除小红点 (演示)
+                                withAnimation {
+                                    viewModel.hasUnreadNotifications = false
+                                }
+                            }) {
+                                ZStack(alignment: .topTrailing) {
+                                    Image(systemName: "bell.fill")
+                                        .font(.title2)
+                                        .foregroundStyle(.primary)
+                                        .padding(12)
+                                        .background(.ultraThinMaterial) // 毛玻璃背景
+                                        .clipShape(Circle())
+                                        .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+                                    
+                                    // 小红点逻辑
+                                    if viewModel.hasUnreadNotifications {
+                                        Circle()
+                                            .fill(.red)
+                                            .frame(width: 10, height: 10)
+                                            .offset(x: 0, y: 0) // 调整位置在右上角
+                                            .overlay(Circle().stroke(.white, lineWidth: 1.5)) // 加个白边更好看
+                                    }
+                                }
+                            }
+                            
+                            // 2. Filter 按钮
+                            Button(action: {
+                                viewModel.showFilterSheet = true
+                            }) {
+                                Image(systemName: "slider.horizontal.3") // 筛选图标
+                                    .font(.title2)
+                                    .foregroundStyle(.primary)
+                                    .padding(12)
+                                    .background(.ultraThinMaterial)
+                                    .clipShape(Circle())
+                                    .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+                            }
+                        }
+                        .padding(.trailing, 16) // 右边距
+                        .padding(.top, 60)      // 顶部避开刘海/灵动岛
+                    }
+                    Spacer()
+                }
+            }
+            
             
             // 右下角定位按钮
             if !viewModel.isSelectingMode {
