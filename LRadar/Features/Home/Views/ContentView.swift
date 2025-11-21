@@ -75,10 +75,14 @@ struct ContentView: View {
                         post: post,
                         onDismiss: {
                             viewModel.closePostDetail()
-                            selectedPostID = nil // 🔥
+                            selectedPostID = nil
                         },
                         onLike: { viewModel.toggleLike(for: post) },
-                        onDelete: { viewModel.deletePost(post) }
+                        onDelete: { viewModel.deletePost(post) },
+                        // 🔥 这里处理举报逻辑
+                        onReport: { reason in
+                            viewModel.reportPost(post, reason: reason)
+                        }
                     )
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }

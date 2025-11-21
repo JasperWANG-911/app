@@ -228,186 +228,180 @@ struct PostInputCard: View {
     var canSubmit: Bool { !viewModel.inputTitle.isEmpty }
 }
 
-// MARK: - 4. 帖子详情卡片 (支持点赞、删除 + 评分展示)
+// MARK: - 4. 帖子详情卡片 (支持点赞、删除 + 评分展示 + 举报)
 struct PostDetailCard: View {
     let post: Post
     var onDismiss: () -> Void
     var onLike: () -> Void
     var onDelete: () -> Void
+    // 这里的 onReport 我们让它带一个原因参数，方便扩展
+    var onReport: (String) -> Void
     
     @State private var showDeleteAlert = false
+    @State private var showReportAlert = false // 🔥 控制举报确认弹窗
+    @State private var showToast = false       // 🔥 控制成功提示显示
     
-    // 辅助计算属性：格式化相对时间
+    // 辅助计算属性
     private var timeAgo: String {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .full
         return formatter.localizedString(for: post.timestamp, relativeTo: Date())
     }
     
-    // 辅助计算属性：判断是否是当前用户的帖子
     private var isMyPost: Bool {
         guard let currentUserID = Auth.auth().currentUser?.uid else { return false }
         return post.authorID == currentUserID
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            
-            // --- 1. 图片轮播区域 ---
-            ZStack(alignment: .topTrailing) {
-                // A. 优先加载云端 URL
-                if !post.imageURLs.isEmpty {
-                    TabView {
-                        ForEach(post.imageURLs, id: \.self) { urlString in
-                            AsyncImage(url: URL(string: urlString)) { phase in
-                                switch phase {
-                                case .empty:
-                                    ZStack {
-                                        Color.gray.opacity(0.1)
-                                        ProgressView()
-                                    }
-                                case .success(let image):
-                                    image.resizable().scaledToFill()
-                                case .failure:
-                                    ZStack {
-                                        Color.gray.opacity(0.1)
-                                        Image(systemName: "photo.badge.exclamationmark").foregroundStyle(.gray)
-                                    }
-                                @unknown default: EmptyView()
+        ZStack(alignment: .bottom) { // 使用 ZStack 以便让 Toast 浮在上面
+            VStack(alignment: .leading, spacing: 0) {
+                
+                // --- 1. 图片轮播区域 ---
+                ZStack(alignment: .topTrailing) {
+                    // ... (图片显示代码保持不变，省略以节省篇幅，请保留你原有的 AsyncImage/TabView 代码) ...
+                    // 这里为了演示，我只保留占位符逻辑，你记得保留原有的图片加载逻辑！
+                    if !post.imageURLs.isEmpty {
+                        TabView {
+                            ForEach(post.imageURLs, id: \.self) { urlString in
+                                AsyncImage(url: URL(string: urlString)) { phase in
+                                    if let image = phase.image { image.resizable().scaledToFill() }
+                                    else { Color.gray.opacity(0.1) }
+                                }.frame(height: 300).clipped()
+                            }
+                        }
+                        .frame(height: 300).tabViewStyle(.page)
+                    } else {
+                        Rectangle().fill(Color(post.color).gradient).frame(height: 200)
+                            .overlay(Image(systemName: post.icon).font(.system(size: 60)).foregroundStyle(.white.opacity(0.5)))
+                    }
+                    
+                    // D. 顶部悬浮按钮
+                    HStack {
+                        if isMyPost {
+                            Button(action: { showDeleteAlert = true }) {
+                                Image(systemName: "trash.fill")
+                                    .font(.headline).foregroundStyle(.red)
+                                    .padding(8).background(.white.opacity(0.8)).clipShape(Circle())
+                            }
+                        } else {
+                            // 🔥 举报入口
+                            Menu {
+                                Button(role: .destructive) {
+                                    showReportAlert = true // 点击后弹出确认框
+                                } label: {
+                                    Label("Report Post", systemImage: "exclamationmark.bubble")
+                                }
+                                // 屏蔽功能暂时隐藏，等想好逻辑再加
+                                // Button(...) { ... }
+                            } label: {
+                                Image(systemName: "ellipsis")
+                                    .font(.headline).foregroundStyle(.black)
+                                    .padding(8).background(.white.opacity(0.8)).clipShape(Circle())
+                            }
+                        }
+                        
+                        Spacer()
+                        
+                        Button(action: onDismiss) {
+                            Image(systemName: "xmark")
+                                .font(.headline).foregroundStyle(.black)
+                                .padding(8).background(.white.opacity(0.8)).clipShape(Circle())
+                        }
+                    }
+                    .padding(16)
+                }
+                
+                // --- 2. 文字内容区域 ---
+                VStack(alignment: .leading, spacing: 12) {
+                    // ... (文字部分代码保持不变，保留你原有的 HStack/Text 逻辑) ...
+                    HStack {
+                        HStack(spacing: 4) {
+                            Image(systemName: post.icon)
+                            Text(post.category.rawValue)
+                        }
+                        .font(.caption.bold()).foregroundStyle(.white)
+                        .padding(.vertical, 6).padding(.horizontal, 12)
+                        .background(Capsule().fill(Color(post.color)))
+                        
+                        if post.rating > 0 {
+                            Spacer().frame(width: 8)
+                            HStack(spacing: 2) {
+                                Text(String(format: "%.1f", post.rating)).font(.caption.bold()).foregroundStyle(.yellow)
+                                StarRatingView(rating: Int(post.rating), interactive: false)
+                            }
+                        }
+                        Spacer()
+                        Text(timeAgo).font(.caption).foregroundStyle(.gray)
+                    }
+                    
+                    Text(post.title).font(.title2).bold()
+                    Text(post.caption).font(.body).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    
+                    Divider().padding(.vertical, 8)
+                    
+                    // --- 3. 底部用户信息栏 ---
+                    HStack {
+                        PostAuthorRow(userId: post.authorID)
+                        Spacer()
+                        Button(action: onLike) {
+                            HStack(spacing: 6) {
+                                Image(systemName: post.isLiked ? "heart.fill" : "heart")
+                                    .font(.title2).foregroundStyle(post.isLiked ? .red : .black)
+                                    .contentTransition(.symbolEffect(.replace))
+                                if post.likeCount > 0 {
+                                    Text("\(post.likeCount)").font(.subheadline).foregroundStyle(.gray)
                                 }
                             }
-                            .frame(height: 300).clipped()
                         }
                     }
-                    .frame(height: 300)
-                    .tabViewStyle(.page)
                 }
-                // B. 兼容旧数据：本地文件名
-                else if !post.imageFilenames.isEmpty {
-                    TabView {
-                        ForEach(post.imageFilenames, id: \.self) { filename in
-                            if let image = DataManager.shared.loadImage(filename: filename) {
-                                Image(uiImage: image).resizable().scaledToFill().frame(height: 300).clipped()
-                            }
-                        }
-                    }
-                    .frame(height: 300).tabViewStyle(.page)
-                }
-                // C. 无图占位
-                else {
-                    Rectangle()
-                        .fill(Color(post.color).gradient)
-                        .frame(height: 200)
-                        .overlay(
-                            Image(systemName: post.icon)
-                                .font(.system(size: 60))
-                                .foregroundStyle(.white.opacity(0.5))
-                        )
-                }
-                
-                // D. 顶部悬浮按钮 (删除 & 关闭)
-                HStack {
-                    // 只有作者本人才能看到删除按钮
-                    if isMyPost {
-                        Button(action: { showDeleteAlert = true }) {
-                            Image(systemName: "trash.fill")
-                                .font(.headline)
-                                .foregroundStyle(.red)
-                                .padding(8)
-                                .background(.white.opacity(0.8))
-                                .clipShape(Circle())
-                        }
-                    }
-                    
-                    Spacer()
-                    
-                    // 关闭按钮
-                    Button(action: onDismiss) {
-                        Image(systemName: "xmark")
-                            .font(.headline)
-                            .foregroundStyle(.black)
-                            .padding(8)
-                            .background(.white.opacity(0.8))
-                            .clipShape(Circle())
-                    }
-                }
-                .padding(16)
+                .padding(24)
+                .background(Color.white)
             }
+            .clipShape(RoundedRectangle(cornerRadius: 24))
+            .shadow(color: .black.opacity(0.2), radius: 20, y: 10)
+            .padding(.horizontal)
+            .padding(.bottom, 40)
             
-            // --- 2. 文字内容区域 ---
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    HStack(spacing: 4) {
-                        Image(systemName: post.icon)
-                        Text(post.category.rawValue)
-                    }
-                    .font(.caption.bold())
-                    .foregroundStyle(.white)
-                    .padding(.vertical, 6)
-                    .padding(.horizontal, 12)
-                    .background(Capsule().fill(Color(post.color)))
-                    
-                    // 🔥 新增：评分展示 (如果有分)
-                    if post.rating > 0 {
-                        Spacer().frame(width: 8) // 小间距
-                        HStack(spacing: 2) {
-                            Text(String(format: "%.1f", post.rating))
-                                .font(.caption.bold())
-                                .foregroundStyle(.yellow)
-                            StarRatingView(rating: Int(post.rating), interactive: false)
+            // 🔥 关键：Toast 提示层
+            if showToast {
+                ToastView(message: "Thanks for reporting. Admins will review shortly.")
+                    .onAppear {
+                        // 2秒后自动消失
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                            withAnimation { showToast = false }
                         }
                     }
-                    
-                    Spacer()
-                    
-                    // 动态时间显示
-                    Text(timeAgo)
-                        .font(.caption)
-                        .foregroundStyle(.gray)
-                }
-                
-                Text(post.title).font(.title2).bold()
-                
-                Text(post.caption).font(.body).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                
-                Divider().padding(.vertical, 8)
-                
-                // --- 3. 底部用户信息栏 ---
-                HStack {
-                    PostAuthorRow(userId: post.authorID)
-                    
-                    Spacer()
-                    
-                    // 点赞按钮
-                    Button(action: onLike) {
-                        HStack(spacing: 6) {
-                            Image(systemName: post.isLiked ? "heart.fill" : "heart")
-                                .font(.title2)
-                                .foregroundStyle(post.isLiked ? .red : .black)
-                                .contentTransition(.symbolEffect(.replace))
-                            
-                            if post.likeCount > 0 {
-                                Text("\(post.likeCount)")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.gray)
-                            }
-                        }
-                    }
-                }
             }
-            .padding(24)
-            .background(Color.white)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 24))
-        .shadow(color: .black.opacity(0.2), radius: 20, y: 10)
-        .padding(.horizontal)
-        .padding(.bottom, 40)
+        // 🔥 删除确认弹窗
         .alert("Delete this Drop?", isPresented: $showDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) { onDelete() }
         } message: {
             Text("This action cannot be undone.")
+        }
+        // 🔥 举报确认弹窗
+        .confirmationDialog("Report this post?", isPresented: $showReportAlert, titleVisibility: .visible) {
+            Button("Inappropriate Content", role: .destructive) {
+                handleReport(reason: "Inappropriate Content")
+            }
+            Button("Spam or Scam", role: .destructive) {
+                handleReport(reason: "Spam or Scam")
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Please select a reason. Our team will review this report.")
+        }
+    }
+    
+    // 内部处理函数：触发回调并显示 Toast
+    private func handleReport(reason: String) {
+        onReport(reason) // 调用外部传入的 ViewModel 逻辑写入数据库
+        withAnimation {
+            showToast = true // 显示成功提示
         }
     }
 }

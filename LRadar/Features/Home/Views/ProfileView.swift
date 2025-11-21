@@ -3,6 +3,7 @@ import FirebaseAuth
 
 struct ProfileView: View {
     var viewModel: HomeViewModel
+    
     @Binding var currentTab: Tab
     
     @AppStorage("isUserLoggedIn") private var isUserLoggedIn: Bool = false
@@ -14,6 +15,8 @@ struct ProfileView: View {
     
     // 控制跳转到 All Drops 的状态
     @State private var showAllDrops = false
+    
+    @State private var showDeleteAccountAlert = false
     
     let columns = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
     
@@ -110,19 +113,50 @@ struct ProfileView: View {
             .background(Color.white)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button { print("Settings") } label: { Label("Settings", systemImage: "gear") }
-                        Divider()
-                        Button(role: .destructive) {
-                            try? Auth.auth().signOut()
-                            isUserLoggedIn = false
-                        } label: { Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right") }
-                    } label: {
-                        Image(systemName: "line.3.horizontal").foregroundStyle(.black).fontWeight(.semibold)
-                    }
-                }
-            }
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Menu {
+                                    Button { print("Settings") } label: { Label("Settings", systemImage: "gear") }
+                                    
+                                    Divider()
+                                    
+                                    // 退出登录
+                                    Button(role: .destructive) {
+                                        try? Auth.auth().signOut()
+                                        isUserLoggedIn = false
+                                    } label: {
+                                        Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
+                                    }
+                                    
+                                    // 🔥 新增：删除账号
+                                    Button(role: .destructive) {
+                                        showDeleteAccountAlert = true
+                                    } label: {
+                                        Label("Delete Account", systemImage: "trash")
+                                    }
+                                    
+                                } label: {
+                                    Image(systemName: "line.3.horizontal").foregroundStyle(.black).fontWeight(.semibold)
+                                }
+                            }
+                        }
+                        // 🔥 新增：删除账号的 Alert 处理
+                        .alert("Delete Account?", isPresented: $showDeleteAccountAlert) {
+                            Button("Cancel", role: .cancel) { }
+                            Button("Delete", role: .destructive) {
+                                viewModel.deleteAccount { success in
+                                    if success {
+                                        // 删除成功，切回登录页
+                                        isUserLoggedIn = false
+                                    } else {
+                                        // 失败通常是因为需要重新认证
+                                        // 这里可以加个简单的 Toast 提示，或者直接打印日志
+                                        print("Require recent login to delete")
+                                    }
+                                }
+                            }
+                        } message: {
+                            Text("This will permanently delete your profile, posts, and data. This action cannot be undone.")
+                        }
             // ✅ 跳转目的地
             .navigationDestination(isPresented: $showAllDrops) {
                 MyDropsListView(viewModel: viewModel, currentTab: $currentTab)

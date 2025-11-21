@@ -1,6 +1,7 @@
 import SwiftUI
 import FirebaseFirestore
 import FirebaseStorage
+import FirebaseAuth
 
 class DataManager {
     static let shared = DataManager()
@@ -82,6 +83,20 @@ class DataManager {
         }
     }
     
+    /// 原子化更新点赞数 (修复竞态条件)
+    func updatePostLikeCount(postId: String, increment: Bool) async {
+        let ref = db.collection("posts").document(postId)
+        let value: Int64 = increment ? 1 : -1
+        
+        do {
+            try await ref.updateData([
+                "likeCount": FieldValue.increment(value)
+            ])
+        } catch {
+            print("🔥 更新点赞失败: \(error.localizedDescription)")
+        }
+    }
+    
     /// 删除帖子 (同时清理云端图片)
     func deletePostFromCloud(post: Post) {
         let postID = post.id.uuidString
@@ -159,5 +174,20 @@ class DataManager {
             return UIImage(data: data)
         }
         return nil
+    }
+    
+    // MARK: - 举报与屏蔽
+        
+    /// 提交举报
+    func reportContent(targetID: String, type: String, reason: String) {
+        let reportData: [String: Any] = [
+            "targetID": targetID,
+            "type": type, // "post" or "user"
+            "reason": reason,
+            "timestamp": FieldValue.serverTimestamp(),
+            "reporterID": Auth.auth().currentUser?.uid ?? "anonymous"
+        ]
+        // 写入一个专门的 reports 集合，管理员可以在后台看
+        db.collection("reports").addDocument(data: reportData)
     }
 }

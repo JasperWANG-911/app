@@ -340,11 +340,11 @@ class HomeViewModel {
     func toggleLike(for post: Post) {
         guard let index = posts.firstIndex(where: { $0.id == post.id }) else { return }
         
-        // 1. 切换本地状态
+        // 1. 切换本地 UI 状态 (让用户觉得很快)
         let isNowLiked = !posts[index].isLiked
         posts[index].isLiked = isNowLiked
         
-        // 2. 更新本地记录 (Truth Source)
+        // 2. 更新本地计数 (视觉反馈)
         if isNowLiked {
             myLikedPostIDs.insert(post.id.uuidString)
             posts[index].likeCount += 1
@@ -353,22 +353,22 @@ class HomeViewModel {
             posts[index].likeCount = max(0, posts[index].likeCount - 1)
         }
         
-        // 3. 同步 UI (如果正在查看详情)
+        // 3. 同步详情页 UI
         if activePost?.id == post.id {
             activePost = posts[index]
         }
         
-        // 4. 发送请求给云端 (只更新数字)
-        let postToSave = posts[index]
-        Task {
-            // DataManager 的 savePostToCloud 会直接覆盖整个文档
-            // 更好的做法是使用 FieldValue.increment，但为了兼容现有架构，暂时这样写
-            // 由于其他客户端只读 myLikedPostIDs，所以这里把 isLiked=true/false 传上去也不会影响别人
-            _ = await DataManager.shared.savePostToCloud(post: postToSave)
-        }
-        
+        // 4. 触发触觉反馈
         let generator = UIImpactFeedbackGenerator(style: .light)
         generator.impactOccurred()
+        
+        // 5. 🔥 核心修复：发送原子操作指令，而不是保存整个对象
+        Task {
+            await DataManager.shared.updatePostLikeCount(
+                postId: post.id.uuidString,
+                increment: isNowLiked
+            )
+        }
     }
     
     func deletePost(_ post: Post) {
@@ -385,6 +385,57 @@ class HomeViewModel {
             generator.notificationOccurred(.success)
         }
     }
+    
+    func reportPost(_ post: Post, reason: String) {
+            // 只负责发数据给后台，不负责弹窗（弹窗由 View 层处理了）
+            DataManager.shared.reportContent(targetID: post.id.uuidString, type: "post", reason: reason)
+            print("🚨 Report submitted: \(reason)")
+    }
+    
+    // MARK: - 账号管理
+        
+    /// 🔥 删除账号 (包含数据清理)
+    func deleteAccount(completion: @escaping (Bool) -> Void) {
+        guard let user = Auth.auth().currentUser else {
+            completion(false)
+            return
+        }
+        
+        let userID = user.uid
+        print("🗑️ 开始删除用户: \(userID)")
+        
+        // 1. 找出该用户所有的帖子
+        let userPosts = self.posts.filter { $0.authorID == userID }
+        
+        // 2. 异步删除所有帖子 (Firestore + Storage)
+        // 这里我们利用已有的 deletePostFromCloud 方法
+        for post in userPosts {
+            DataManager.shared.deletePostFromCloud(post: post)
+        }
+        
+        // 3. 删除 Firestore 中的用户资料
+        let db = Firestore.firestore()
+        db.collection("users").document(userID).delete { error in
+            if let error = error {
+                print("⚠️ 删除用户资料失败: \(error.localizedDescription)")
+            } else {
+                print("✅ 用户资料已删除")
+            }
+        }
+        
+        // 4. 删除 Firebase Auth 账户
+        // 注意：这步必须最后做，否则删了 Auth 就没权限删数据了
+        user.delete { error in
+            if let error = error {
+                print("❌ 删除 Auth 账户失败 (可能需要重登): \(error.localizedDescription)")
+                completion(false)
+            } else {
+                print("✅ Auth 账户已彻底删除")
+                completion(true)
+            }
+        }
+    }
+    
     
     func focusOnUserLocation(_ coordinate: CLLocationCoordinate2D) {
         withAnimation(.spring(duration: 1.0)) {
