@@ -3,7 +3,6 @@ import FirebaseAuth
 
 struct ProfileView: View {
     var viewModel: HomeViewModel
-    
     @Binding var currentTab: Tab
     
     @AppStorage("isUserLoggedIn") private var isUserLoggedIn: Bool = false
@@ -12,11 +11,13 @@ struct ProfileView: View {
     @State private var isShowingEdit = false
     @State private var isShowingShare = false
     @State private var isShowingRatingDetail = false
-    
-    // 控制跳转到 All Drops 的状态
     @State private var showAllDrops = false
     
-    @State private var showDeleteAccountAlert = false
+    // 🔥 新增：控制设置页面的跳转
+    @State private var showSettings = false
+    
+    // 冻结排序 ID
+    @State private var frozenTopIDs: [UUID] = []
     
     let columns = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
     
@@ -33,26 +34,19 @@ struct ProfileView: View {
                         onRatingTap: { isShowingRatingDetail = true }
                     )
                     
-                    // 2. 数据统计 (修复点击跳转)
+                    // 2. 数据统计
                     ProfileStatsView(
                         postsCount: viewModel.myDropsCount,
                         likesCount: viewModel.myTotalLikes,
-                        onDropsTap: {
-                            print("🔵 Drops tapped - Navigating")
-                            showAllDrops = true
-                        }
+                        onDropsTap: { showAllDrops = true }
                     )
                     
                     Divider().padding(.horizontal)
                     
-                    // 3. My Top Drops (预览区)
-                    // 整个区域都是按钮，点击去列表页
-                    Button(action: {
-                        print("🔵 My Top Drops tapped")
-                        showAllDrops = true
-                    }) {
-                        VStack(alignment: .leading, spacing: 16) {
-                            // 3.1 标题栏
+                    // 3. My Top Drops
+                    VStack(alignment: .leading, spacing: 16) {
+                        // 3.1 标题栏
+                        Button(action: { showAllDrops = true }) {
                             HStack {
                                 Text("My Top Drops").font(.headline).foregroundStyle(.black)
                                 Spacer()
@@ -60,106 +54,99 @@ struct ProfileView: View {
                                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(.gray)
                             }
                             .padding(.horizontal)
-                            
-                            // 3.2 内容网格
-                            // 🔥 关键修复：这里必须检查 myDrops，而不是 posts (posts 是全网所有帖子)
-                            if viewModel.myDrops.isEmpty {
-                                EmptyStateView()
-                            } else {
-                                LazyVGrid(columns: columns, spacing: 2) {
-                                    // 只显示前 6 张图
-                                    ForEach(viewModel.myDrops.prefix(6)) { post in
-                                        ZStack {
-                                            // 1. 云端图片
-                                            if let urlString = post.imageURLs.first, let url = URL(string: urlString) {
-                                                AsyncImage(url: url) { image in
-                                                    image.resizable().scaledToFill()
-                                                } placeholder: {
-                                                    Color.gray.opacity(0.1)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        
+                        // 3.2 内容网格
+                        if frozenTopIDs.isEmpty {
+                            EmptyStateView()
+                        } else {
+                            LazyVGrid(columns: columns, spacing: 2) {
+                                ForEach(frozenTopIDs, id: \.self) { id in
+                                    if let post = viewModel.myDrops.first(where: { $0.id == id }) {
+                                        ZStack(alignment: .bottomTrailing) {
+                                            // A. 图片主体
+                                            Group {
+                                                if let urlString = post.imageURLs.first, let url = URL(string: urlString) {
+                                                    AsyncImage(url: url) { image in
+                                                        image.resizable().scaledToFill()
+                                                    } placeholder: {
+                                                        Color.gray.opacity(0.1)
+                                                    }
+                                                } else if let filename = post.imageFilenames.first,
+                                                          let image = DataManager.shared.loadImage(filename: filename) {
+                                                    Image(uiImage: image).resizable().scaledToFill()
+                                                } else {
+                                                    Rectangle().fill(Color(post.color).gradient)
+                                                        .overlay(
+                                                            Image(systemName: post.icon)
+                                                                .font(.title2)
+                                                                .foregroundStyle(.white.opacity(0.8))
+                                                        )
                                                 }
-                                                .frame(width: (UIScreen.main.bounds.width - 4) / 3, height: (UIScreen.main.bounds.width - 4) / 3)
-                                                .clipped()
                                             }
-                                            // 2. 本地图片兼容
-                                            else if let filename = post.imageFilenames.first,
-                                                    let image = DataManager.shared.loadImage(filename: filename) {
-                                                Image(uiImage: image)
-                                                    .resizable().scaledToFill()
-                                                    .frame(width: (UIScreen.main.bounds.width - 4) / 3, height: (UIScreen.main.bounds.width - 4) / 3)
-                                                    .clipped()
+                                            .frame(width: (UIScreen.main.bounds.width - 4) / 3, height: (UIScreen.main.bounds.width - 4) / 3)
+                                            .clipped()
+                                            .contentShape(Rectangle())
+                                            .onTapGesture {
+                                                viewModel.jumpToPost(post)
+                                                currentTab = .map
                                             }
-                                            // 3. 默认占位
-                                            else {
-                                                Rectangle().fill(Color(post.color).gradient)
-                                                    .frame(width: (UIScreen.main.bounds.width - 4) / 3, height: (UIScreen.main.bounds.width - 4) / 3)
-                                                    .overlay(
-                                                        Image(systemName: post.icon)
-                                                            .font(.title2)
-                                                            .foregroundStyle(.white.opacity(0.8))
-                                                    )
+                                            
+                                            // B. 右下角点赞
+                                            Button(action: {
+                                                viewModel.toggleLike(for: post)
+                                            }) {
+                                                HStack(spacing: 4) {
+                                                    Image(systemName: post.isLiked ? "heart.fill" : "heart")
+                                                        .font(.caption2)
+                                                        .foregroundStyle(post.isLiked ? .red : .white)
+                                                        .contentTransition(.symbolEffect(.replace))
+                                                    
+                                                    Text("\(post.likeCount)")
+                                                        .font(.caption2).bold()
+                                                        .foregroundStyle(.white)
+                                                }
+                                                .padding(.horizontal, 10)
+                                                .padding(.vertical, 6)
+                                                .background(.ultraThinMaterial)
+                                                .background(.black.opacity(0.3))
+                                                .clipShape(Capsule())
+                                                .padding(6)
                                             }
+                                            .buttonStyle(.plain)
                                         }
-                                        .contentShape(Rectangle())
                                     }
                                 }
                             }
                         }
-                        .padding(.bottom, 100)
-                        .contentShape(Rectangle()) // 确保点击空白处也能触发
                     }
-                    .buttonStyle(.plain) // 避免按钮点击时的灰色闪烁
+                    .padding(.bottom, 100)
                 }
             }
             .background(Color.white)
             .navigationBarTitleDisplayMode(.inline)
+            
+            // 🔥 核心修改：Toolbar 改为齿轮图标 -> 跳转 SettingsView
             .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Menu {
-                                    Button { print("Settings") } label: { Label("Settings", systemImage: "gear") }
-                                    
-                                    Divider()
-                                    
-                                    // 退出登录
-                                    Button(role: .destructive) {
-                                        try? Auth.auth().signOut()
-                                        isUserLoggedIn = false
-                                    } label: {
-                                        Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
-                                    }
-                                    
-                                    // 🔥 新增：删除账号
-                                    Button(role: .destructive) {
-                                        showDeleteAccountAlert = true
-                                    } label: {
-                                        Label("Delete Account", systemImage: "trash")
-                                    }
-                                    
-                                } label: {
-                                    Image(systemName: "line.3.horizontal").foregroundStyle(.black).fontWeight(.semibold)
-                                }
-                            }
-                        }
-                        // 🔥 新增：删除账号的 Alert 处理
-                        .alert("Delete Account?", isPresented: $showDeleteAccountAlert) {
-                            Button("Cancel", role: .cancel) { }
-                            Button("Delete", role: .destructive) {
-                                viewModel.deleteAccount { success in
-                                    if success {
-                                        // 删除成功，切回登录页
-                                        isUserLoggedIn = false
-                                    } else {
-                                        // 失败通常是因为需要重新认证
-                                        // 这里可以加个简单的 Toast 提示，或者直接打印日志
-                                        print("Require recent login to delete")
-                                    }
-                                }
-                            }
-                        } message: {
-                            Text("This will permanently delete your profile, posts, and data. This action cannot be undone.")
-                        }
-            // ✅ 跳转目的地
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: {
+                        showSettings = true
+                    }) {
+                        Image(systemName: "gearshape.fill") // 使用实心齿轮更显眼
+                            .foregroundStyle(.black)
+                            .font(.system(size: 18, weight: .semibold))
+                    }
+                }
+            }
+            // 🔥 跳转逻辑
             .navigationDestination(isPresented: $showAllDrops) {
                 MyDropsListView(viewModel: viewModel, currentTab: $currentTab)
+            }
+            .navigationDestination(isPresented: $showSettings) {
+                // 进入设置页面，传入必要的绑定
+                SettingsView(viewModel: viewModel, isUserLoggedIn: $isUserLoggedIn)
             }
             .sheet(isPresented: $isShowingEdit) {
                 EditProfileView(profileCopy: viewModel.currentUser, onSave: { updatedProfile, newImage in
@@ -176,11 +163,31 @@ struct ProfileView: View {
                     .presentationDetents([.height(400)])
                     .presentationCornerRadius(24)
             }
+            // 生命周期：刷新排序
+            .onAppear {
+                refreshTopDropsOrder()
+            }
+            .onChange(of: viewModel.myDrops.isEmpty) { _, isEmpty in
+                if !isEmpty && frozenTopIDs.isEmpty {
+                    refreshTopDropsOrder()
+                }
+            }
         }
+    }
+    
+    private func refreshTopDropsOrder() {
+        let sorted = viewModel.myDrops.sorted {
+            if $0.likeCount != $1.likeCount {
+                return $0.likeCount > $1.likeCount
+            } else {
+                return $0.timestamp > $1.timestamp
+            }
+        }
+        frozenTopIDs = sorted.prefix(6).map { $0.id }
     }
 }
 
-// MARK: - 子组件修复
+// MARK: - Child Views (保持不变，直接复用即可)
 
 struct ProfileStatsView: View {
     let postsCount: Int
@@ -189,24 +196,21 @@ struct ProfileStatsView: View {
     
     var body: some View {
         HStack(spacing: 0) {
-            // Drops 区域 (按钮)
             Button(action: onDropsTap) {
                 StatUnit(value: "\(postsCount)", title: "Drops")
                     .frame(maxWidth: .infinity)
-                    .background(Color.white.opacity(0.01)) // 🔥 关键：增加点击热区，防止点不到
+                    .background(Color.white.opacity(0.01))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
             Divider().frame(height: 24)
             
-            // Likes 区域
             StatUnit(value: "\(likesCount)", title: "Likes")
                 .frame(maxWidth: .infinity)
             
             Divider().frame(height: 24)
             
-            // Friends 区域
             StatUnit(value: "0", title: "Friends")
                 .frame(maxWidth: .infinity)
         }
@@ -214,7 +218,6 @@ struct ProfileStatsView: View {
     }
 }
 
-// 下面的组件保持不变，不需要改动
 struct StatUnit: View {
     let value: String
     let title: String
@@ -251,6 +254,12 @@ struct ProfileHeaderView: View {
                         }
                         .frame(width: 96, height: 96).clipShape(Circle())
                         .overlay(Circle().stroke(Color.white, lineWidth: 4))
+                    } else if let filename = user.avatarFilename,
+                              let image = DataManager.shared.loadImage(filename: filename) {
+                        Image(uiImage: image)
+                            .resizable().scaledToFill()
+                            .frame(width: 96, height: 96).clipShape(Circle())
+                            .overlay(Circle().stroke(Color.white, lineWidth: 4))
                     } else {
                         Image(systemName: "person.crop.circle.fill")
                             .resizable()
@@ -302,7 +311,6 @@ struct ProfileHeaderView: View {
     }
 }
 
-// ... 其他 RatingView, ShareSheet, EmptyStateView 保持不变 ...
 struct EmptyStateView: View {
     var body: some View {
         VStack(spacing: 12) {
@@ -327,23 +335,6 @@ struct RatingBreakdownView: View {
             }
             Spacer()
         }.padding()
-    }
-}
-
-struct RatingBar: View {
-    let star: Int
-    let percentage: CGFloat
-    var body: some View {
-        HStack {
-            Text("\(star)").font(.caption).bold().frame(width: 20)
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.gray.opacity(0.2))
-                    Capsule().fill(Color.black).frame(width: geo.size.width * percentage)
-                }
-            }
-            .frame(height: 6)
-        }
     }
 }
 
