@@ -1,7 +1,8 @@
 import SwiftUI
 import PhotosUI
+import FirebaseAuth // 🔥 引入 Auth 用于判断当前用户
 
-// MARK: - 1. 地图上的气泡 (Annotation) - 已修复点击区域
+// MARK: - 1. 地图上的气泡 (Annotation)
 struct PostAnnotationView: View {
     var color: UIColor
     var icon: String
@@ -25,7 +26,7 @@ struct PostAnnotationView: View {
                             .bold()
                     )
             }
-            .zIndex(1) // 确保圆压在三角上面
+            .zIndex(1)
             
             // 2. 下半部分：倒三角
             Image(systemName: "triangle.fill")
@@ -33,12 +34,10 @@ struct PostAnnotationView: View {
                 .frame(width: 12, height: 10)
                 .foregroundStyle(.white)
                 .rotationEffect(.degrees(180))
-                .offset(y: -3) // 稍微向上提一点，防止圆和三角中间有缝隙
+                .offset(y: -3)
                 .shadow(radius: 2)
                 .zIndex(0)
         }
-        // ⚠️ 注意：这里去掉了原来的 .offset(y: -26)
-        // 现在这是一个实实在在的整体视图，点击任何部位都会响应
     }
 }
 
@@ -50,7 +49,6 @@ struct PostInputCard: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 
-                // ... 标题栏和类型选择保持不变 ...
                 HStack {
                     Text("New Drop").font(.title2).bold()
                     Spacer()
@@ -82,12 +80,10 @@ struct PostInputCard: View {
                         .lineLimit(3...6).padding(12).background(Color(UIColor.secondarySystemBackground)).cornerRadius(12)
                 }
                 
-                // ⚠️ 修改点：多图上传与预览
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Text("Photos (Max 9)").font(.caption).foregroundStyle(.gray)
                         Spacer()
-                        // 这里的 selection 改为 $viewModel.imageSelections，并添加 maxSelectionCount
                         PhotosPicker(selection: $viewModel.imageSelections, maxSelectionCount: 9, matching: .images) {
                             HStack {
                                 Image(systemName: "photo.badge.plus")
@@ -99,13 +95,11 @@ struct PostInputCard: View {
                     }
                     
                     if viewModel.selectedImages.isEmpty {
-                        // 空状态占位符
                         RoundedRectangle(cornerRadius: 12)
                             .fill(Color(UIColor.secondarySystemBackground).opacity(0.5))
                             .frame(height: 100)
                             .overlay(Image(systemName: "photo.on.rectangle").foregroundStyle(.gray))
                     } else {
-                        // 水平滚动预览选中的图片
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 10) {
                                 ForEach(viewModel.selectedImages, id: \.self) { img in
@@ -144,21 +138,33 @@ struct PostInputCard: View {
 struct PostDetailCard: View {
     let post: Post
     var onDismiss: () -> Void
-    // 新增回调
     var onLike: () -> Void
     var onDelete: () -> Void
     
     @State private var showDeleteAlert = false
+    
+    // 🔥 辅助计算属性：格式化相对时间
+    private var timeAgo: String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full // 显示完整单词，如 "2 hours ago"
+        return formatter.localizedString(for: post.timestamp, relativeTo: Date())
+    }
+    
+    // 🔥 辅助计算属性：判断是否是当前用户的帖子
+    private var isMyPost: Bool {
+        guard let currentUserID = Auth.auth().currentUser?.uid else { return false }
+        return post.authorID == currentUserID
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             
             // 图片轮播区域
             ZStack(alignment: .topTrailing) {
+                // 优先加载云端 URL
                 if !post.imageURLs.isEmpty {
                     TabView {
                         ForEach(post.imageURLs, id: \.self) { urlString in
-                            // 使用 AsyncImage 加载网络图片
                             AsyncImage(url: URL(string: urlString)) { phase in
                                 switch phase {
                                 case .empty:
@@ -167,43 +173,33 @@ struct PostDetailCard: View {
                                         ProgressView()
                                     }
                                 case .success(let image):
-                                    image
-                                        .resizable()
-                                        .scaledToFill()
+                                    image.resizable().scaledToFill()
                                 case .failure:
                                     ZStack {
                                         Color.gray.opacity(0.1)
-                                        Image(systemName: "photo.badge.exclamationmark")
-                                            .foregroundStyle(.gray)
+                                        Image(systemName: "photo.badge.exclamationmark").foregroundStyle(.gray)
                                     }
-                                @unknown default:
-                                    EmptyView()
+                                @unknown default: EmptyView()
                                 }
                             }
-                            .frame(height: 300)
-                            .clipped()
+                            .frame(height: 300).clipped()
                         }
                     }
                     .frame(height: 300)
                     .tabViewStyle(.page)
                 }
-                // 兼容旧数据：如果没有 URL 但有本地文件名
+                // 兼容旧数据：本地文件名
                 else if !post.imageFilenames.isEmpty {
                     TabView {
                         ForEach(post.imageFilenames, id: \.self) { filename in
                             if let image = DataManager.shared.loadImage(filename: filename) {
-                                Image(uiImage: image)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(height: 300)
-                                    .clipped()
+                                Image(uiImage: image).resizable().scaledToFill().frame(height: 300).clipped()
                             }
                         }
                     }
-                    .frame(height: 300)
-                    .tabViewStyle(.page)
+                    .frame(height: 300).tabViewStyle(.page)
                 }
-                // 既没 URL 也没本地图 -> 显示默认背景
+                // 无图
                 else {
                     Rectangle()
                         .fill(Color(post.color).gradient)
@@ -217,19 +213,21 @@ struct PostDetailCard: View {
                 
                 // 顶部按钮组
                 HStack {
-                    // 左上角：删除按钮
-                    Button(action: { showDeleteAlert = true }) {
-                        Image(systemName: "trash.fill")
-                            .font(.headline)
-                            .foregroundStyle(.red)
-                            .padding(8)
-                            .background(.white.opacity(0.8))
-                            .clipShape(Circle())
+                    // 🔥 只有作者本人才能看到删除按钮
+                    if isMyPost {
+                        Button(action: { showDeleteAlert = true }) {
+                            Image(systemName: "trash.fill")
+                                .font(.headline)
+                                .foregroundStyle(.red)
+                                .padding(8)
+                                .background(.white.opacity(0.8))
+                                .clipShape(Circle())
+                        }
                     }
                     
                     Spacer()
                     
-                    // 右上角：关闭按钮
+                    // 关闭按钮
                     Button(action: onDismiss) {
                         Image(systemName: "xmark")
                             .font(.headline)
@@ -256,7 +254,10 @@ struct PostDetailCard: View {
                     .background(Capsule().fill(Color(post.color)))
                     
                     Spacer()
-                    Text("Just now").font(.caption).foregroundStyle(.gray)
+                    // 🔥 动态时间显示
+                    Text(timeAgo)
+                        .font(.caption)
+                        .foregroundStyle(.gray)
                 }
                 
                 Text(post.title).font(.title2).bold()
@@ -272,10 +273,8 @@ struct PostDetailCard: View {
                         .overlay(Image(systemName: "person.fill").foregroundStyle(.gray))
                     
                     VStack(alignment: .leading, spacing: 2) {
-                        // 🔥 修改点：简单的逻辑判断
-                        // 注意：这里暂时没有把所有用户列表传进来，所以暂时只判断是不是自己
-                        // 等接了数据库，这里会根据 authorID 异步加载用户信息
-                        Text(post.authorID == DataManager.shared.loadUserProfile()?.id ? "Posted by You" : "Posted by User")
+                        // 显示是否是本人
+                        Text(isMyPost ? "Posted by You" : "Posted by User")
                             .font(.subheadline).bold()
                         
                         Text("UCL Student").font(.caption).foregroundStyle(.gray)
@@ -307,7 +306,6 @@ struct PostDetailCard: View {
         .shadow(color: .black.opacity(0.2), radius: 20, y: 10)
         .padding(.horizontal)
         .padding(.bottom, 40)
-        // 删除确认弹窗
         .alert("Delete this Drop?", isPresented: $showDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) { onDelete() }
@@ -317,7 +315,7 @@ struct PostDetailCard: View {
     }
 }
 
-// MARK: - 4. 辅助组件：分类药丸 (CategoryPill 保持不变)
+// MARK: - 4. 辅助组件：分类药丸
 struct CategoryPill: View {
     let category: PostCategory
     let isSelected: Bool

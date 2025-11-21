@@ -4,17 +4,19 @@ import FirebaseAuth
 
 @main
 struct LRadarApp: App {
-    // 1. 这里的 State 不要直接赋值，改为只声明类型
-    @State private var isUserLoggedIn: Bool
+    // 🔥 修改 1: 改用 AppStorage，这样可以在 ProfileView 里修改它
+    @AppStorage("isUserLoggedIn") private var isUserLoggedIn: Bool = false
     
-    // 2. 添加 init 方法，确保初始化顺序
     init() {
-        // 第一步：启动 Firebase (必须最先执行)
         FirebaseApp.configure()
         
-        // 第二步：手动初始化 State
-        // 这样确保了调用 Auth.auth() 时，Firebase 已经配置好了
-        _isUserLoggedIn = State(initialValue: Auth.auth().currentUser != nil)
+        // 🔥 修改 2: 启动时检查 Firebase 真实状态，同步给 AppStorage
+        // 如果 Firebase 认为没登录，就强制设为 false
+        if Auth.auth().currentUser != nil {
+            UserDefaults.standard.set(true, forKey: "isUserLoggedIn")
+        } else {
+            UserDefaults.standard.set(false, forKey: "isUserLoggedIn")
+        }
     }
     
     var body: some Scene {
@@ -22,8 +24,8 @@ struct LRadarApp: App {
             if isUserLoggedIn {
                 ContentView()
             } else {
-                // 登录成功的回调
                 LoginView {
+                    // 登录成功回调
                     isUserLoggedIn = true
                 }
             }

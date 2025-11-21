@@ -1,8 +1,12 @@
 import SwiftUI
+import FirebaseAuth
 
 struct ProfileView: View {
     var viewModel: HomeViewModel
     @Binding var currentTab: Tab
+    
+    // 🔥 新增: 引入同一个 AppStorage 键值
+    @AppStorage("isUserLoggedIn") private var isUserLoggedIn: Bool = false
     
     // 状态控制
     @State private var isShowingEdit = false
@@ -59,7 +63,7 @@ struct ProfileView: View {
                                 EmptyStateView()
                             } else {
                                 LazyVGrid(columns: columns, spacing: 2) {
-                                    ForEach(viewModel.posts.prefix(6)) { post in
+                                    ForEach(viewModel.myDrops.prefix(6)) { post in
                                         ZStack {
                                             // 1. 云端图片
                                             if let urlString = post.imageURLs.first, let url = URL(string: urlString) {
@@ -110,7 +114,17 @@ struct ProfileView: View {
                     Menu {
                         Button { print("Settings") } label: { Label("Settings", systemImage: "gear") }
                         Divider()
-                        Button(role: .destructive) { print("Logout") } label: { Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right") }
+                        Button(role: .destructive) {
+                            do {
+                                // 1. Firebase 登出
+                                try Auth.auth().signOut()
+                                // 2. 切换 App 状态 (这会自动让 LRadarApp 切换回 LoginView)
+                                isUserLoggedIn = false
+                                print("已安全退出")
+                            } catch {
+                                print("退出失败: \(error.localizedDescription)")
+                            }
+                        } label: { Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right") }
                     } label: {
                         Image(systemName: "line.3.horizontal").foregroundStyle(.black).fontWeight(.semibold)
                     }

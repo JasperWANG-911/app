@@ -40,15 +40,21 @@ class HomeViewModel {
     var showToast = false
     var toastMessage = ""
     
-    // 统计数据
+    // 🔥 新增：专门筛选出“我的帖子” (用于 ProfileView 和 MyDropsListView)
+    var myDrops: [Post] {
+        posts.filter { $0.authorID == currentUser.id }
+            .sorted { $0.timestamp > $1.timestamp }
+    }
+
     var myDropsCount: Int {
-        posts.filter { $0.authorID == currentUser.id }.count
+        myDrops.count
     }
     
     var myTotalLikes: Int {
         posts.filter { $0.authorID == currentUser.id }
-             .reduce(0) { $0 + $1.likeCount }
+            .reduce(0) { $0 + $1.likeCount }
     }
+
     
     // MARK: - 初始化
     init() {
