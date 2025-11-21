@@ -39,12 +39,23 @@ class HomeViewModel {
     var showToast = false
     var toastMessage = ""
     
+    var myDropsCount: Int {
+            posts.filter { $0.authorID == currentUser.id }.count
+        }
+        
+    // 🔥 新增：计算当前用户所有帖子获得的总赞数
+    var myTotalLikes: Int {
+        posts.filter { $0.authorID == currentUser.id }
+             .reduce(0) { $0 + $1.likeCount }
+    }
+    
     // --- 初始化：加载本地数据 ---
     init() {
         if let savedProfile = DataManager.shared.loadUserProfile() {
             self.currentUser = savedProfile
         } else {
             self.currentUser = UserProfile(
+                id: UUID().uuidString, // 🔥 给一个临时 ID
                 name: "New User",
                 handle: "@new_user",
                 school: "UCL",
@@ -112,13 +123,29 @@ class HomeViewModel {
                 
                 // 创建帖子
                 let newPost = Post(
-                    latitude: coord.latitude,
-                    longitude: coord.longitude,
+                    // 1. 必须先传 authorID
+                    authorID: self.currentUser.id,
+                    
+                    // 2. 接着是标题、内容、分类 (根据 Post.swift 的定义顺序)
                     title: currentTitle,
                     caption: currentCaption,
                     category: currentCategory,
+                    
+                    // 3. 然后才是经纬度
+                    latitude: coord.latitude,
+                    longitude: coord.longitude,
+                    
+                    // 4. 图片信息
+                    imageFilenames: savedFilenames,
+                    imageURLs: [], // 暂时留空，给云端预留
+                    
+                    // 5. 时间戳
+                    timestamp: Date(),
+                    
+                    // 6. 互动数据
                     rating: 0,
-                    imageFilenames: savedFilenames // 存入数组
+                    likeCount: 0,
+                    isLiked: false
                 )
                 
                 await MainActor.run {

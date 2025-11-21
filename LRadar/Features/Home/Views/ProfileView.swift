@@ -29,7 +29,8 @@ struct ProfileView: View {
                     
                     // 2. 数据统计 (这里调用了 onDropsTap)
                     ProfileStatsView(
-                        postsCount: viewModel.posts.count,
+                        postsCount: viewModel.myDropsCount, // 👈 改用 viewModel.myDropsCount
+                        likesCount: viewModel.myTotalLikes, // 👈 传入 viewModel.myTotalLikes
                         onDropsTap: {
                             print("Drops stat tapped")
                             showAllDrops = true
@@ -192,14 +193,14 @@ struct ProfileHeaderView: View {
     }
 }
 
-// ⚠️ 重点修复了这里：添加了 onDropsTap 属性
 struct ProfileStatsView: View {
     let postsCount: Int
-    var onDropsTap: () -> Void // 👈 之前你的代码里缺了这个
+    let likesCount: Int // 👈 新增这个属性
+    var onDropsTap: () -> Void
     
     var body: some View {
         HStack(spacing: 0) {
-            // Drops 区域 (可点击)
+            // Drops 区域
             Button(action: onDropsTap) {
                 StatUnit(value: "\(postsCount)", title: "Drops")
                     .frame(maxWidth: .infinity)
@@ -209,13 +210,13 @@ struct ProfileStatsView: View {
 
             Divider().frame(height: 24)
             
-            // Likes
-            StatUnit(value: "1.2k", title: "Likes")
+            // Likes 区域 (已修改)
+            StatUnit(value: "\(likesCount)", title: "Likes") // 👈 使用传入的真实数据
                 .frame(maxWidth: .infinity)
             
             Divider().frame(height: 24)
             
-            // Friends
+            // Friends (暂时保持静态，等做了好友功能再改)
             StatUnit(value: "342", title: "Friends")
                 .frame(maxWidth: .infinity)
         }

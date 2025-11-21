@@ -6,6 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		FC6C1D562ED0D77F00C05683 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = FC6C1D552ED0D77F00C05683 /* FirebaseAuth */; };
+		FC6C1D582ED0D77F00C05683 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = FC6C1D572ED0D77F00C05683 /* FirebaseFirestore */; };
+		FC6C1D5A2ED0D77F00C05683 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = FC6C1D592ED0D77F00C05683 /* FirebaseStorage */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		FCFB208D2ECEAE0C00F8E663 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +58,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FC6C1D562ED0D77F00C05683 /* FirebaseAuth in Frameworks */,
+				FC6C1D582ED0D77F00C05683 /* FirebaseFirestore in Frameworks */,
+				FC6C1D5A2ED0D77F00C05683 /* FirebaseStorage in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +121,9 @@
 			);
 			name = LRadar;
 			packageProductDependencies = (
+				FC6C1D552ED0D77F00C05683 /* FirebaseAuth */,
+				FC6C1D572ED0D77F00C05683 /* FirebaseFirestore */,
+				FC6C1D592ED0D77F00C05683 /* FirebaseStorage */,
 			);
 			productName = LRadar;
 			productReference = FCFB207F2ECEAE0A00F8E663 /* LRadar.app */;
@@ -195,6 +207,9 @@
 			);
 			mainGroup = FCFB20762ECEAE0A00F8E663;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				FC6C1D542ED0D77F00C05683 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = FCFB20802ECEAE0A00F8E663 /* Products */;
 			projectDirPath = "";
@@ -395,6 +410,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = LRadar/LRadar.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 8HWTQL5936;
@@ -424,6 +440,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = LRadar/LRadar.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 8HWTQL5936;
@@ -560,6 +577,35 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		FC6C1D542ED0D77F00C05683 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.6.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		FC6C1D552ED0D77F00C05683 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FC6C1D542ED0D77F00C05683 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		FC6C1D572ED0D77F00C05683 /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FC6C1D542ED0D77F00C05683 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+		FC6C1D592ED0D77F00C05683 /* FirebaseStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FC6C1D542ED0D77F00C05683 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseStorage;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = FCFB20772ECEAE0A00F8E663 /* Project object */;
 }

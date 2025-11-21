@@ -237,8 +237,13 @@ struct PostDetailCard: View {
                         .overlay(Image(systemName: "person.fill").foregroundStyle(.gray))
                     
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Posted by You").font(.subheadline).bold()
-                        Text("Verified User").font(.caption).foregroundStyle(.gray)
+                        // 🔥 修改点：简单的逻辑判断
+                        // 注意：这里暂时没有把所有用户列表传进来，所以暂时只判断是不是自己
+                        // 等接了数据库，这里会根据 authorID 异步加载用户信息
+                        Text(post.authorID == DataManager.shared.loadUserProfile()?.id ? "Posted by You" : "Posted by User")
+                            .font(.subheadline).bold()
+                        
+                        Text("UCL Student").font(.caption).foregroundStyle(.gray)
                     }
                     
                     Spacer()

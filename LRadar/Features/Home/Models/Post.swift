@@ -31,36 +31,56 @@ enum PostCategory: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-struct Post: Identifiable, Codable {
-    var id = UUID() // 建议改为 var，虽然 let 也可以，但在某些解码场景下 var 更灵活
-    let latitude: Double
-    let longitude: Double
-    let title: String
-    let caption: String
-    let category: PostCategory
-    let rating: Int // 可以保留作为帖子的评分
-    
-    // 新增字段
-    var isLiked: Bool = false
-    var likeCount: Int = 0
-    
-    var imageFilenames: [String] = []
-    
-    var coordinate: CLLocationCoordinate2D {
-        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
-    }
-    var color: UIColor { category.color }
-    var icon: String { category.icon }
-    
-    var hasImage: Bool { !imageFilenames.isEmpty }
-}
+// MARK: - 核心数据模型 (Cloud Ready)
 
-struct UserProfile: Codable {
+struct UserProfile: Codable, Identifiable {
+    // 🔥 新增: 唯一用户ID (未来对应 Firebase UID)
+    var id: String
+    
     var name: String
     var handle: String
     var school: String
     var major: String
     var bio: String
     var rating: Double
+    
+    // 头像：本地存文件名，云端存 URL
     var avatarFilename: String?
+    var avatarURL: String?
+}
+
+struct Post: Identifiable, Codable {
+    var id = UUID()
+    
+    // 🔥 新增: 作者ID (关联到 UserProfile.id)
+    let authorID: String
+    
+    // 核心内容
+    let title: String
+    let caption: String
+    let category: PostCategory
+    
+    // 地理位置
+    let latitude: Double
+    let longitude: Double
+    
+    // 媒体资源
+    var imageFilenames: [String] = [] // 本地图片名 (缓存)
+    var imageURLs: [String] = []      // 云端图片链接 (未来使用)
+    
+    // 🔥 新增: 时间戳 (用于排序)
+    var timestamp: Date = Date()
+    
+    // 互动数据
+    var rating: Int = 0
+    var likeCount: Int = 0
+    var isLiked: Bool = false // 注意：这个状态在云端通常是单独查询的，但在本地模型中先保留方便 UI 显示
+    
+    // 辅助计算属性
+    var coordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+    var color: UIColor { category.color }
+    var icon: String { category.icon }
+    var hasImage: Bool { !imageFilenames.isEmpty }
 }
