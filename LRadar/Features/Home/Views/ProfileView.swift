@@ -171,15 +171,43 @@ struct ProfileHeaderView: View {
         VStack(spacing: 16) {
             Button(action: onEditTap) {
                 ZStack(alignment: .bottomTrailing) {
-                    if let filename = user.avatarFilename,
+                    // 1. 优先显示云端头像 URL
+                    if let avatarURL = user.avatarURL, let url = URL(string: avatarURL) {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .empty:
+                                Color.gray.opacity(0.1) // 加载中占位
+                            case .success(let image):
+                                image.resizable().scaledToFill()
+                            case .failure:
+                                Image(systemName: "person.crop.circle.fill").foregroundStyle(.gray)
+                            @unknown default:
+                                EmptyView()
+                            }
+                        }
+                        .frame(width: 96, height: 96)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(Color.white, lineWidth: 4))
+                        .shadow(color: .black.opacity(0.05), radius: 5)
+                    }
+                    // 2. 兼容旧数据：本地文件名
+                    else if let filename = user.avatarFilename,
                        let avatar = DataManager.shared.loadImage(filename: filename) {
                         Image(uiImage: avatar).resizable().scaledToFill()
                             .frame(width: 96, height: 96).clipShape(Circle())
                             .overlay(Circle().stroke(Color.white, lineWidth: 4)).shadow(color: .black.opacity(0.05), radius: 5)
-                    } else {
-                        Image(systemName: "person.crop.circle.fill").resizable().foregroundStyle(Color(UIColor.secondarySystemBackground))
-                            .frame(width: 96, height: 96).overlay(Circle().stroke(Color.white, lineWidth: 4))
                     }
+                    // 3. 默认头像
+                    else {
+                        Image(systemName: "person.crop.circle.fill")
+                            .resizable()
+                            .foregroundStyle(Color(UIColor.secondarySystemBackground))
+                            .frame(width: 96, height: 96)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(Color.white, lineWidth: 4))
+                    }
+                    
+                    // 评分徽章
                     Button(action: onRatingTap) {
                         HStack(spacing: 3) {
                             Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow)

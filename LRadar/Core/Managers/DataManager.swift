@@ -12,14 +12,14 @@ class DataManager {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
     
-    // MARK: - 1. 图片上传 (新增)
-    func uploadImage(_ image: UIImage) async -> String? {
-        // 使用 extensions 里的 resize 方法
+    // MARK: - 1. 图片上传 (🔥 修改：增加 folder 参数，默认为 "post_images")
+    func uploadImage(_ image: UIImage, folder: String = "post_images") async -> String? {
         guard let resizedImage = image.resized(toWidth: 1080),
               let data = resizedImage.jpegData(compressionQuality: 0.7) else { return nil }
         
         let filename = "\(UUID().uuidString).jpg"
-        let storageRef = storage.reference().child("post_images").child(filename)
+        // 使用传入的 folder 参数
+        let storageRef = storage.reference().child(folder).child(filename)
         
         do {
             let _ = try await storageRef.putDataAsync(data)
@@ -31,7 +31,7 @@ class DataManager {
         }
     }
     
-    // MARK: - 2. 帖子管理 (Firestore)
+    // MARK: - 2. 帖子管理
     func savePostToCloud(post: Post) async -> Bool {
         do {
             try db.collection("posts").document(post.id.uuidString).setData(from: post)
@@ -58,7 +58,7 @@ class DataManager {
         db.collection("posts").document(post.id.uuidString).delete()
     }
     
-    // MARK: - 3. 辅助方法 (本地图片/用户缓存)
+    // MARK: - 3. 辅助方法
     func saveImage(_ image: UIImage, name: String) -> String? {
         if let data = image.jpegData(compressionQuality: 0.8) {
             let filename = name + ".jpg"
@@ -91,7 +91,6 @@ class DataManager {
         }
     }
     
-    // 新增：保存用户资料到云端
     func saveUserProfileToCloud(profile: UserProfile) {
         try? db.collection("users").document(profile.id).setData(from: profile)
     }

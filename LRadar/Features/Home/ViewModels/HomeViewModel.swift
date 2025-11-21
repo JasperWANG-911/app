@@ -1,7 +1,7 @@
 import SwiftUI
 import MapKit
 import PhotosUI
-import FirebaseAuth // 🔥 必须引入，用于获取 currentUser.uid
+import FirebaseAuth // 🔥 必须引入
 
 @Observable
 class HomeViewModel {
@@ -40,9 +40,15 @@ class HomeViewModel {
     var showToast = false
     var toastMessage = ""
     
-    // 🔥 新增：专门筛选出“我的帖子” (用于 ProfileView 和 MyDropsListView)
+    // 🔥 核心修复：确保筛选 ID 的一致性
+    // 使用计算属性动态获取当前登录的真实 UID，而不是依赖可能过期的 currentUser.id
+    var currentUserID: String {
+        Auth.auth().currentUser?.uid ?? currentUser.id
+    }
+    
     var myDrops: [Post] {
-        posts.filter { $0.authorID == currentUser.id }
+        // 过滤出 authorID 等于当前真实 UID 的帖子
+        posts.filter { $0.authorID == currentUserID }
             .sorted { $0.timestamp > $1.timestamp }
     }
 
@@ -51,18 +57,16 @@ class HomeViewModel {
     }
     
     var myTotalLikes: Int {
-        posts.filter { $0.authorID == currentUser.id }
-            .reduce(0) { $0 + $1.likeCount }
+        myDrops.reduce(0) { $0 + $1.likeCount }
     }
 
     
     // MARK: - 初始化
     init() {
-        // 1. 加载本地用户资料作为缓存 (防止 UI 空白)
+        // 1. 加载本地用户资料作为缓存
         if let savedProfile = DataManager.shared.loadUserProfile() {
             self.currentUser = savedProfile
         } else {
-            // 默认占位符
             self.currentUser = UserProfile(
                 id: UUID().uuidString,
                 name: "New User",
@@ -75,16 +79,28 @@ class HomeViewModel {
             )
         }
         
-        // 2. 启动时异步拉取云端帖子
+        // 2. 启动时异步拉取云端数据
         Task {
             await fetchPosts()
+            await refreshCurrentUser() // 🔥 新增：确保用户信息也是最新的
         }
     }
     
-    // 从云端拉取数据
     @MainActor
     func fetchPosts() async {
-        self.posts = await DataManager.shared.fetchPostsFromCloud()
+        // 拉取并过滤掉可能的坏数据
+        let cloudPosts = await DataManager.shared.fetchPostsFromCloud()
+        self.posts = cloudPosts.filter { !$0.authorID.isEmpty } // 简单过滤
+    }
+    
+    // 🔥 新增：刷新当前用户信息
+    @MainActor
+    func refreshCurrentUser() async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        if let profile = await DataManager.shared.fetchUserProfileFromCloud(userId: uid) {
+            self.currentUser = profile
+            DataManager.shared.saveUserProfile(profile) // 更新本地缓存
+        }
     }
     
     // MARK: - 核心交互逻辑
@@ -118,57 +134,53 @@ class HomeViewModel {
         }
     }
     
-    // MARK: - 🔥 核心功能：发帖 (云端版)
+    // MARK: - 🔥 核心功能：发帖
     func submitPost() {
         guard let coord = selectedLocation else { return }
         
-        // 1. 准备数据
         let currentTitle = inputTitle
         let currentCaption = inputCaption
         let currentCategory = inputCategory
         let imagesToUpload = selectedImages
-        // 优先使用 Firebase 登录用户的 UID，没有则用本地 ID 兜底
-        let authorID = Auth.auth().currentUser?.uid ?? currentUser.id
         
-        // 2. 立即关闭 UI，给用户“发送中”的流畅感
+        // 🔥 关键：使用统一的 currentUserID
+        let authorID = self.currentUserID
+        
         exitSelectionMode()
         
-        // 3. 后台异步上传
         Task(priority: .userInitiated) {
             var uploadedURLs: [String] = []
             
-            // A. 循环上传每一张图片到 Firebase Storage
             for image in imagesToUpload {
                 if let url = await DataManager.shared.uploadImage(image) {
                     uploadedURLs.append(url)
-                    print("📸 图片上传成功: \(url)")
                 }
             }
             
-            // B. 创建 Post 对象
-            // 注意：imageFilenames 留空，数据存入 imageURLs
             let newPost = Post(
-                authorID: authorID,
+                authorID: authorID, // 确保 ID 一致
                 title: currentTitle,
                 caption: currentCaption,
                 category: currentCategory,
                 latitude: coord.latitude,
                 longitude: coord.longitude,
-                imageFilenames: [],          // 本地字段不再使用
-                imageURLs: uploadedURLs,     // ✅ 填入云端 URL
+                imageFilenames: [],
+                imageURLs: uploadedURLs,
                 timestamp: Date(),
                 rating: 0,
                 likeCount: 0,
                 isLiked: false
             )
             
-            // C. 保存到 Firestore 数据库
             let success = await DataManager.shared.savePostToCloud(post: newPost)
             
-            // D. 成功后更新本地列表
             if success {
                 await MainActor.run {
-                    self.posts.insert(newPost, at: 0) // 插入到顶部
+                    self.posts.insert(newPost, at: 0)
+                    // 强制更新一下 currentUser 的 ID，防止极端情况下 ID 不一致
+                    if self.currentUser.id != authorID {
+                        self.currentUser.id = authorID
+                    }
                     let generator = UINotificationFeedbackGenerator()
                     generator.notificationOccurred(.success)
                 }
@@ -208,6 +220,9 @@ class HomeViewModel {
         isShowingInputSheet = false
         selectedLocation = nil
         
+        // 打印一下 ID，方便调试
+        print("Jumping to post: \(post.id), Author: \(post.authorID)")
+        
         withAnimation { self.activePost = post }
         
         withAnimation(.spring(duration: 1.5)) {
@@ -243,21 +258,30 @@ class HomeViewModel {
     func updateUserProfile(_ newProfile: UserProfile) {
         self.currentUser = newProfile
         DataManager.shared.saveUserProfile(currentUser)
+        // 🔥 同步保存到云端
+        DataManager.shared.saveUserProfileToCloud(profile: newProfile)
     }
     
     func updateUserAvatar(_ image: UIImage) {
-        // 目前头像还是本地保存，后续可以参考 uploadImage 改为上传
-        let filename = DataManager.shared.saveImage(image, name: "avatar_\(UUID().uuidString)")
-        var updatedProfile = currentUser
-        updatedProfile.avatarFilename = filename
-        updateUserProfile(updatedProfile)
-    }
+            Task(priority: .userInitiated) {
+                // 🔥 修改点：指定 folder 为 "avatars"
+                if let url = await DataManager.shared.uploadImage(image, folder: "avatars") {
+                    await MainActor.run {
+                        var updatedProfile = currentUser
+                        updatedProfile.avatarURL = url
+                        updateUserProfile(updatedProfile)
+                        print("头像已上传到 avatars 文件夹: \(url)")
+                    }
+                } else {
+                    print("头像上传失败")
+                }
+            }
+        }
     
-    // MARK: - 点赞与删除 (已适配云端)
+    // MARK: - 点赞与删除
     
     func toggleLike(for post: Post) {
         if let index = posts.firstIndex(where: { $0.id == post.id }) {
-            // 1. 本地立即更新 UI
             posts[index].isLiked.toggle()
             if posts[index].isLiked {
                 posts[index].likeCount += 1
@@ -265,12 +289,10 @@ class HomeViewModel {
                 posts[index].likeCount = max(0, posts[index].likeCount - 1)
             }
             
-            // 同步更新当前详情页
             if activePost?.id == post.id {
                 activePost = posts[index]
             }
             
-            // 2. 异步保存单个帖子到云端
             Task {
                 _ = await DataManager.shared.savePostToCloud(post: posts[index])
             }
@@ -279,18 +301,14 @@ class HomeViewModel {
     
     func deletePost(_ post: Post) {
         if let index = posts.firstIndex(where: { $0.id == post.id }) {
-            // 1. 本地移除
             posts.remove(at: index)
             
-            // 2. 如果正在看这个帖子，关闭详情
             if activePost?.id == post.id {
                 closePostDetail()
             }
             
-            // 3. 云端删除
             DataManager.shared.deletePostFromCloud(post: post)
             
-            // 4. 反馈
             let generator = UINotificationFeedbackGenerator()
             generator.notificationOccurred(.success)
         }

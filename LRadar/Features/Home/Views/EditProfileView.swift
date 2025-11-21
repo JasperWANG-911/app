@@ -20,17 +20,30 @@ struct EditProfileView: View {
                     VStack(spacing: 12) {
                         PhotosPicker(selection: $imageSelection, matching: .images) {
                             ZStack {
-                                // 优先显示临时图，其次显示磁盘旧图
+                                // A. 优先显示刚选的临时图
                                 if let temp = tempAvatarImage {
                                     Image(uiImage: temp)
                                         .resizable().scaledToFill()
                                         .frame(width: 100, height: 100).clipShape(Circle())
-                                } else if let filename = profileCopy.avatarFilename,
+                                }
+                                // B. 其次显示云端 URL (新增逻辑)
+                                else if let avatarURL = profileCopy.avatarURL, let url = URL(string: avatarURL) {
+                                    AsyncImage(url: url) { image in
+                                        image.resizable().scaledToFill()
+                                    } placeholder: {
+                                        ProgressView()
+                                    }
+                                    .frame(width: 100, height: 100).clipShape(Circle())
+                                }
+                                // C. 其次显示本地缓存 (兼容旧数据)
+                                else if let filename = profileCopy.avatarFilename,
                                         let savedImage = DataManager.shared.loadImage(filename: filename) {
                                     Image(uiImage: savedImage)
                                         .resizable().scaledToFill()
                                         .frame(width: 100, height: 100).clipShape(Circle())
-                                } else {
+                                }
+                                // D. 默认占位符
+                                else {
                                     Circle().fill(Color(UIColor.secondarySystemBackground)).frame(width: 100, height: 100)
                                         .overlay(Image(systemName: "person.fill").foregroundStyle(.gray))
                                 }
@@ -94,7 +107,6 @@ struct EditProfileView: View {
     }
 }
 
-// MARK: - 辅助组件：输入框 (解决了 'InputGroup' not found 错误)
 struct InputGroup: View {
     let title: String
     @Binding var text: String
