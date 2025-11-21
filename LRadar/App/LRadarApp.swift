@@ -1,32 +1,29 @@
 import SwiftUI
-import FirebaseCore // 👈 引入 Firebase 核心库
+import FirebaseCore
 import FirebaseAuth
-
-// 1. 创建 AppDelegate 来进行初始化
-class AppDelegate: NSObject, UIApplicationDelegate {
-  func application(_ application: UIApplication,
-                   didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
-    FirebaseApp.configure() // 👈 这里启动 Firebase
-    return true
-  }
-}
 
 @main
 struct LRadarApp: App {
-    @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
+    // 1. 这里的 State 不要直接赋值，改为只声明类型
+    @State private var isUserLoggedIn: Bool
     
-    // 监听 Firebase 认证状态
-    @State private var isUserLoggedIn = (Auth.auth().currentUser != nil)
+    // 2. 添加 init 方法，确保初始化顺序
+    init() {
+        // 第一步：启动 Firebase (必须最先执行)
+        FirebaseApp.configure()
+        
+        // 第二步：手动初始化 State
+        // 这样确保了调用 Auth.auth() 时，Firebase 已经配置好了
+        _isUserLoggedIn = State(initialValue: Auth.auth().currentUser != nil)
+    }
     
     var body: some Scene {
         WindowGroup {
             if isUserLoggedIn {
-                // 已登录，进入主界面
                 ContentView()
             } else {
-                // 未登录，显示登录页
+                // 登录成功的回调
                 LoginView {
-                    // 登录成功后的回调：切换状态
                     isUserLoggedIn = true
                 }
             }
