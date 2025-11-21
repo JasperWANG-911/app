@@ -18,9 +18,9 @@ struct ContentView: View {
                 case .map:
                     mapView
                 case .friends:
-                    VStack { Text("Friends Coming Soon") }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.white)
+                    FriendsView() // 使用 SideViews.swift 里定义的 FriendsView
                 case .profile:
-                    // ✅ 传入 ProfileView 的数据
+                    // 传入 ProfileView 的数据
                     ProfileView(viewModel: viewModel, currentTab: $currentTab)
                 }
             }
@@ -63,13 +63,21 @@ struct ContentView: View {
             }
             
             // --- 5. 帖子详情弹窗 (Post Detail) ---
+            // ⚠️ 关键修改：连接了点赞和删除功能
             if let post = viewModel.activePost {
-                Color.black.opacity(0.3).ignoresSafeArea().onTapGesture { viewModel.closePostDetail() }.transition(.opacity)
+                Color.black.opacity(0.3).ignoresSafeArea()
+                    .onTapGesture { viewModel.closePostDetail() }
+                    .transition(.opacity)
                 
                 VStack {
                     Spacer()
-                    PostDetailCard(post: post, onDismiss: { viewModel.closePostDetail() })
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    PostDetailCard(
+                        post: post,
+                        onDismiss: { viewModel.closePostDetail() },
+                        onLike: { viewModel.toggleLike(for: post) },    // ✅ 连接 ViewModel 的点赞逻辑
+                        onDelete: { viewModel.deletePost(post) }        // ✅ 连接 ViewModel 的删除逻辑
+                    )
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
                 .zIndex(101)
             }
@@ -97,6 +105,7 @@ struct ContentView: View {
         ZStack {
             MapReader { proxy in
                 Map(position: $viewModel.cameraPosition) {
+                    // 1. 用户当前位置
                     UserAnnotation()
                     
                     if let userLoc = locationManager.userLocation {
@@ -105,8 +114,10 @@ struct ContentView: View {
                             .stroke(Color.purple.opacity(0.5), lineWidth: 1)
                     }
                     
+                    // 2. 帖子气泡 (这就是你要添加逻辑的地方)
                     ForEach(viewModel.posts) { post in
-                        Annotation("", coordinate: post.coordinate) {
+                        // ⚠️ 修改点：添加 anchor: .bottom
+                        Annotation("", coordinate: post.coordinate, anchor: .bottom) {
                             PostAnnotationView(color: post.color, icon: post.icon)
                                 .onTapGesture {
                                     viewModel.jumpToPost(post)
@@ -114,6 +125,7 @@ struct ContentView: View {
                         }
                     }
                     
+                    // 3. 正在选点时的临时气泡
                     if let tempLoc = viewModel.selectedLocation {
                         Annotation("New", coordinate: tempLoc) {
                             Circle().fill(.orange).frame(width: 16, height: 16).overlay(Circle().stroke(.white, lineWidth: 3)).shadow(radius: 5)
@@ -121,6 +133,7 @@ struct ContentView: View {
                     }
                 }
                 .mapStyle(.standard(elevation: .realistic))
+                // ... 地图背景点击逻辑保持不变 ...
                 .onTapGesture { position in
                     if let coordinate = proxy.convert(position, from: .local) {
                         viewModel.handleMapTap(at: coordinate)
@@ -145,7 +158,7 @@ struct ContentView: View {
                         }
                     }
                     .padding(.horizontal)
-                    .padding(.bottom, viewModel.activePost != nil ? 300 : 90)
+                    .padding(.bottom, viewModel.activePost != nil ? 300 : 40)
                 }
             }
         }

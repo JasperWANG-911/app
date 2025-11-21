@@ -207,6 +207,48 @@ class HomeViewModel {
         updateUserProfile(updatedProfile)
     }
     
+    func toggleLike(for post: Post) {
+            // 在数组中找到对应的帖子索引
+            if let index = posts.firstIndex(where: { $0.id == post.id }) {
+                // 切换点赞状态
+                posts[index].isLiked.toggle()
+                // 更新数字
+                if posts[index].isLiked {
+                    posts[index].likeCount += 1
+                } else {
+                    posts[index].likeCount = max(0, posts[index].likeCount - 1)
+                }
+                
+                // 如果当前正在查看这张卡片，也需要同步更新 activePost，否则 UI 不会立即变化
+                if activePost?.id == post.id {
+                    activePost = posts[index]
+                }
+                
+                // 保存到本地
+                DataManager.shared.savePosts(posts)
+            }
+        }
+        
+    func deletePost(_ post: Post) {
+        if let index = posts.firstIndex(where: { $0.id == post.id }) {
+            // 1. 从数组移除
+            posts.remove(at: index)
+            
+            // 2. 如果当前正在看这个帖子，关闭详情页
+            if activePost?.id == post.id {
+                closePostDetail()
+            }
+            
+            // 3. 保存更新后的数组
+            DataManager.shared.savePosts(posts)
+            
+            // 4. 反馈震动
+            let generator = UINotificationFeedbackGenerator()
+            generator.notificationOccurred(.success)
+        }
+    }
+    
+    
     func focusOnUserLocation(_ coordinate: CLLocationCoordinate2D) {
         withAnimation(.spring(duration: 1.0)) {
             cameraPosition = .region(

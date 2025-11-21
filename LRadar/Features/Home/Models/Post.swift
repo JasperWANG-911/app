@@ -2,40 +2,48 @@ import SwiftUI
 import CoreLocation
 
 enum PostCategory: String, CaseIterable, Identifiable, Codable {
-    case food = "Food"
-    case view = "View"
     case alert = "Alert"
-    case fun = "Fun"
+    case food = "Foodie"
+    case thrift = "Market"
+    case explore = "Explore"
+    case campus = "Campus"
     
     var id: String { self.rawValue }
+    
     var icon: String {
         switch self {
-        case .food: return "fork.knife"
-        case .view: return "camera.fill"
-        case .alert: return "exclamationmark.triangle.fill"
-        case .fun: return "party.popper.fill"
+        case .alert: return "exclamationmark.triangle.fill" // 警示
+        case .food: return "fork.knife"                     // 干饭
+        case .thrift: return "sterlingsign.circle.fill"     // 省钱/交易 (英镑符号，如果不喜欢可以用 dollarsign)
+        case .explore: return "camera.fill"                 // 玩乐/拍照
+        case .campus: return "graduationcap.fill"           // 校园生活
         }
     }
+    
     var color: UIColor {
         switch self {
-        case .food: return .systemOrange
-        case .view: return .systemBlue
-        case .alert: return .systemRed
-        case .fun: return .systemPurple
+        case .alert: return .systemRed       // 红色：危险/紧急
+        case .food: return .systemOrange     // 橙色：食欲
+        case .thrift: return .systemGreen    // 绿色：金钱/交易
+        case .explore: return .systemBlue    // 蓝色：户外/天空
+        case .campus: return .systemPurple   // 紫色：智慧/学校
         }
     }
 }
 
 struct Post: Identifiable, Codable {
-    let id = UUID()
+    var id = UUID() // 建议改为 var，虽然 let 也可以，但在某些解码场景下 var 更灵活
     let latitude: Double
     let longitude: Double
     let title: String
     let caption: String
     let category: PostCategory
-    let rating: Int
+    let rating: Int // 可以保留作为帖子的评分
     
-    // ⚠️ 关键修改：支持多张图片
+    // 新增字段
+    var isLiked: Bool = false
+    var likeCount: Int = 0
+    
     var imageFilenames: [String] = []
     
     var coordinate: CLLocationCoordinate2D {
@@ -44,7 +52,6 @@ struct Post: Identifiable, Codable {
     var color: UIColor { category.color }
     var icon: String { category.icon }
     
-    // 辅助判断
     var hasImage: Bool { !imageFilenames.isEmpty }
 }
 

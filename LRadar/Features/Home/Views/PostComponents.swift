@@ -1,37 +1,44 @@
 import SwiftUI
 import PhotosUI
 
-// MARK: - 1. 地图上的气泡 (Annotation)
+// MARK: - 1. 地图上的气泡 (Annotation) - 已修复点击区域
 struct PostAnnotationView: View {
-    var color: UIColor // 接收 UIColor
+    var color: UIColor
     var icon: String
     
     var body: some View {
-        ZStack {
+        VStack(spacing: 0) {
+            // 1. 上半部分：圆形图标
+            ZStack {
+                Circle()
+                    .fill(.white)
+                    .frame(width: 46, height: 46)
+                    .shadow(radius: 4)
+                
+                Circle()
+                    .fill(Color(color).gradient)
+                    .frame(width: 38, height: 38)
+                    .overlay(
+                        Image(systemName: icon)
+                            .foregroundStyle(.white)
+                            .font(.caption)
+                            .bold()
+                    )
+            }
+            .zIndex(1) // 确保圆压在三角上面
+            
+            // 2. 下半部分：倒三角
             Image(systemName: "triangle.fill")
                 .resizable()
                 .frame(width: 12, height: 10)
                 .foregroundStyle(.white)
                 .rotationEffect(.degrees(180))
-                .offset(y: 26)
+                .offset(y: -3) // 稍微向上提一点，防止圆和三角中间有缝隙
                 .shadow(radius: 2)
-            
-            Circle()
-                .fill(.white)
-                .frame(width: 46, height: 46)
-                .shadow(radius: 4)
-            
-            Circle()
-                .fill(Color(color).gradient)
-                .frame(width: 38, height: 38)
-                .overlay(
-                    Image(systemName: icon)
-                        .foregroundStyle(.white)
-                        .font(.caption)
-                        .bold()
-                )
+                .zIndex(0)
         }
-        .offset(y: -26)
+        // ⚠️ 注意：这里去掉了原来的 .offset(y: -26)
+        // 现在这是一个实实在在的整体视图，点击任何部位都会响应
     }
 }
 
@@ -78,10 +85,10 @@ struct PostInputCard: View {
                 // ⚠️ 修改点：多图上传与预览
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text("Photos").font(.caption).foregroundStyle(.gray)
+                        Text("Photos (Max 9)").font(.caption).foregroundStyle(.gray)
                         Spacer()
                         // 这里的 selection 改为 $viewModel.imageSelections，并添加 maxSelectionCount
-                        PhotosPicker(selection: $viewModel.imageSelections, maxSelectionCount: 5, matching: .images) {
+                        PhotosPicker(selection: $viewModel.imageSelections, maxSelectionCount: 9, matching: .images) {
                             HStack {
                                 Image(systemName: "photo.badge.plus")
                                 Text("Add Photos")
@@ -133,15 +140,20 @@ struct PostInputCard: View {
     var canSubmit: Bool { !viewModel.inputTitle.isEmpty }
 }
 
-// MARK: - 3. 帖子详情卡片 (支持左右滑动多图)
+// MARK: - 3. 帖子详情卡片 (支持点赞与删除)
 struct PostDetailCard: View {
     let post: Post
     var onDismiss: () -> Void
+    // 新增回调
+    var onLike: () -> Void
+    var onDelete: () -> Void
+    
+    @State private var showDeleteAlert = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             
-            // ⚠️ 修改点：使用 TabView 实现图片轮播
+            // 图片轮播区域
             ZStack(alignment: .topTrailing) {
                 if !post.imageFilenames.isEmpty {
                     TabView {
@@ -151,15 +163,13 @@ struct PostDetailCard: View {
                                     .resizable()
                                     .scaledToFill()
                                     .frame(height: 300)
-                                    .clipped() // 确保图片不溢出
+                                    .clipped()
                             }
                         }
                     }
                     .frame(height: 300)
-                    .tabViewStyle(.page) // 启用分页圆点样式
-                    .indexViewStyle(.page(backgroundDisplayMode: .interactive))
+                    .tabViewStyle(.page)
                 } else {
-                    // 无图时的默认显示
                     Rectangle()
                         .fill(Color(post.color).gradient)
                         .frame(height: 200)
@@ -170,19 +180,34 @@ struct PostDetailCard: View {
                         )
                 }
                 
-                // 关闭按钮
-                Button(action: onDismiss) {
-                    Image(systemName: "xmark")
-                        .font(.headline)
-                        .foregroundStyle(.black)
-                        .padding(8)
-                        .background(.white.opacity(0.8))
-                        .clipShape(Circle())
+                // 顶部按钮组
+                HStack {
+                    // 左上角：删除按钮
+                    Button(action: { showDeleteAlert = true }) {
+                        Image(systemName: "trash.fill")
+                            .font(.headline)
+                            .foregroundStyle(.red)
+                            .padding(8)
+                            .background(.white.opacity(0.8))
+                            .clipShape(Circle())
+                    }
+                    
+                    Spacer()
+                    
+                    // 右上角：关闭按钮
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark")
+                            .font(.headline)
+                            .foregroundStyle(.black)
+                            .padding(8)
+                            .background(.white.opacity(0.8))
+                            .clipShape(Circle())
+                    }
                 }
                 .padding(16)
             }
             
-            // ... 下方文字内容保持不变 ...
+            // 文字内容区域
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     HStack(spacing: 4) {
@@ -206,19 +231,32 @@ struct PostDetailCard: View {
                 
                 Divider().padding(.vertical, 8)
                 
+                // 底部用户信息栏
                 HStack {
                     Circle().fill(Color(UIColor.secondarySystemBackground)).frame(width: 40, height: 40)
                         .overlay(Image(systemName: "person.fill").foregroundStyle(.gray))
                     
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Posted by Jason").font(.subheadline).bold()
-                        Text("UCL Student").font(.caption).foregroundStyle(.gray)
+                        Text("Posted by You").font(.subheadline).bold()
+                        Text("Verified User").font(.caption).foregroundStyle(.gray)
                     }
                     
                     Spacer()
                     
-                    Button(action: { print("Like") }) {
-                        Image(systemName: "heart").font(.title2).foregroundStyle(.black)
+                    // 点赞按钮
+                    Button(action: onLike) {
+                        HStack(spacing: 6) {
+                            Image(systemName: post.isLiked ? "heart.fill" : "heart")
+                                .font(.title2)
+                                .foregroundStyle(post.isLiked ? .red : .black)
+                                .contentTransition(.symbolEffect(.replace))
+                            
+                            if post.likeCount > 0 {
+                                Text("\(post.likeCount)")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.gray)
+                            }
+                        }
                     }
                 }
             }
@@ -229,6 +267,13 @@ struct PostDetailCard: View {
         .shadow(color: .black.opacity(0.2), radius: 20, y: 10)
         .padding(.horizontal)
         .padding(.bottom, 40)
+        // 删除确认弹窗
+        .alert("Delete this Drop?", isPresented: $showDeleteAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) { onDelete() }
+        } message: {
+            Text("This action cannot be undone.")
+        }
     }
 }
 

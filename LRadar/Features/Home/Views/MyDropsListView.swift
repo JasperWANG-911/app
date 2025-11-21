@@ -1,27 +1,22 @@
 import SwiftUI
-import MapKit
-
-// 注意：HomeViewModel, Post, Tab, DataManager 必须在其他文件里定义且可见
 
 struct MyDropsListView: View {
-    // 接收 ViewModel 和 Tab 绑定
+    // 这里需要把 viewModel 变成 @Bindable 或者直接引用，因为我们需要修改它的数据
+    // 由于 ViewModel 是 class (Reference Type)，直接传递引用即可
     var viewModel: HomeViewModel
     @Binding var currentTab: Tab
     
     var body: some View {
         List {
+            // 使用 ForEach 才能支持 onDelete
             ForEach(viewModel.posts) { post in
-                // 整个 Row 作为一个按钮，点击跳转
                 Button(action: {
-                    // 1. 镜头飞过去
                     viewModel.jumpToPost(post)
-                    // 2. 切换 Tab
                     currentTab = .map
                 }) {
                     HStack(spacing: 16) {
                         // 左侧小图
                         ZStack {
-                            // ⚠️ 修改点：取第一张图作为缩略图
                             if let filename = post.imageFilenames.first,
                                let image = DataManager.shared.loadImage(filename: filename) {
                                 Image(uiImage: image).resizable().scaledToFill()
@@ -35,7 +30,14 @@ struct MyDropsListView: View {
                         // 中间文字
                         VStack(alignment: .leading, spacing: 4) {
                             Text(post.title).font(.headline).foregroundStyle(.black)
-                            Text(post.caption).font(.caption).foregroundStyle(.gray).lineLimit(1)
+                            // 显示点赞数
+                            HStack {
+                                Text(post.caption).font(.caption).foregroundStyle(.gray).lineLimit(1)
+                                if post.isLiked {
+                                    Image(systemName: "heart.fill").font(.caption2).foregroundStyle(.red)
+                                }
+                            }
+                            
                             HStack {
                                 Image(systemName: post.icon).font(.caption2)
                                 Text(post.category.rawValue).font(.caption2).bold()
@@ -44,15 +46,21 @@ struct MyDropsListView: View {
                         
                         Spacer()
                         
-                        // 右侧定位图标
-                        Image(systemName: "location.fill")
-                            .foregroundStyle(Color.blue.opacity(0.6))
+                        Image(systemName: "chevron.right")
+                            .foregroundStyle(.gray.opacity(0.5))
                             .font(.caption)
                     }
                     .padding(.vertical, 4)
                 }
                 .listRowSeparator(.hidden)
                 .buttonStyle(.plain)
+            }
+            // ✅ 添加删除修饰符
+            .onDelete { indexSet in
+                for index in indexSet {
+                    let post = viewModel.posts[index]
+                    viewModel.deletePost(post)
+                }
             }
         }
         .listStyle(.plain)
