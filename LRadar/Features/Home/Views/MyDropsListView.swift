@@ -21,8 +21,8 @@ struct MyDropsListView: View {
                     HStack(spacing: 16) {
                         // 左侧小图
                         ZStack {
-                            // 加载单图逻辑
-                            if let filename = post.imageFilename,
+                            // ⚠️ 修改点：取第一张图作为缩略图
+                            if let filename = post.imageFilenames.first,
                                let image = DataManager.shared.loadImage(filename: filename) {
                                 Image(uiImage: image).resizable().scaledToFill()
                             } else {

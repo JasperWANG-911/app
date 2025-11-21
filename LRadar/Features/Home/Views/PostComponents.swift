@@ -35,7 +35,7 @@ struct PostAnnotationView: View {
     }
 }
 
-// MARK: - 2. 发帖卡片 (PostInputCard) (回溯到单图)
+// MARK: - 2. 发帖卡片 (支持多图)
 struct PostInputCard: View {
     @Bindable var viewModel: HomeViewModel
     
@@ -43,18 +43,15 @@ struct PostInputCard: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 
-                // --- 顶部标题栏 ---
+                // ... 标题栏和类型选择保持不变 ...
                 HStack {
                     Text("New Drop").font(.title2).bold()
                     Spacer()
                     Button(action: { viewModel.cancelPost() }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title2)
-                            .foregroundStyle(.gray.opacity(0.4))
+                        Image(systemName: "xmark.circle.fill").font(.title2).foregroundStyle(.gray.opacity(0.4))
                     }
                 }
                 
-                // --- 1. 种类选择 ---
                 Text("Type").font(.caption).foregroundStyle(.gray)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
@@ -70,57 +67,59 @@ struct PostInputCard: View {
                 
                 Divider()
                 
-                // --- 2. 标题与内容 ---
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Details").font(.caption).foregroundStyle(.gray)
-                    
                     TextField("Title (e.g. Great Coffee)", text: $viewModel.inputTitle)
-                        .font(.headline)
-                        .padding(12)
-                        .background(Color(UIColor.secondarySystemBackground))
-                        .cornerRadius(12)
-                    
+                        .font(.headline).padding(12).background(Color(UIColor.secondarySystemBackground)).cornerRadius(12)
                     TextField("What's happening here?", text: $viewModel.inputCaption, axis: .vertical)
-                        .lineLimit(3...6)
-                        .padding(12)
-                        .background(Color(UIColor.secondarySystemBackground))
-                        .cornerRadius(12)
+                        .lineLimit(3...6).padding(12).background(Color(UIColor.secondarySystemBackground)).cornerRadius(12)
                 }
                 
-                // --- 3. 图片上传 (单图) ---
+                // ⚠️ 修改点：多图上传与预览
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Photo (Optional)").font(.caption).foregroundStyle(.gray)
+                    HStack {
+                        Text("Photos").font(.caption).foregroundStyle(.gray)
+                        Spacer()
+                        // 这里的 selection 改为 $viewModel.imageSelections，并添加 maxSelectionCount
+                        PhotosPicker(selection: $viewModel.imageSelections, maxSelectionCount: 5, matching: .images) {
+                            HStack {
+                                Image(systemName: "photo.badge.plus")
+                                Text("Add Photos")
+                            }
+                            .font(.caption.bold())
+                            .foregroundStyle(.blue)
+                        }
+                    }
                     
-                    PhotosPicker(selection: $viewModel.imageSelection, matching: .images) {
-                        Group {
-                            if let image = viewModel.selectedImage {
-                                Image(uiImage: image)
-                                    .resizable()
-                                    .scaledToFill()
-                            } else {
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(UIColor.secondarySystemBackground).opacity(0.5))
-                                    .overlay(
-                                        Image(systemName: "photo.badge.plus").foregroundStyle(.gray)
-                                    )
+                    if viewModel.selectedImages.isEmpty {
+                        // 空状态占位符
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(UIColor.secondarySystemBackground).opacity(0.5))
+                            .frame(height: 100)
+                            .overlay(Image(systemName: "photo.on.rectangle").foregroundStyle(.gray))
+                    } else {
+                        // 水平滚动预览选中的图片
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(viewModel.selectedImages, id: \.self) { img in
+                                    Image(uiImage: img)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 100, height: 100)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                }
                             }
                         }
-                        .frame(height: 120)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
                 }
                 
                 Spacer(minLength: 20)
                 
-                // --- 4. 发布按钮 ---
                 Button(action: { viewModel.submitPost() }) {
                     Text("Post Drop")
-                        .bold()
-                        .frame(maxWidth: .infinity)
-                        .padding()
+                        .bold().frame(maxWidth: .infinity).padding()
                         .background(canSubmit ? Color.black : Color.gray.opacity(0.3))
-                        .foregroundStyle(.white)
-                        .cornerRadius(16)
+                        .foregroundStyle(.white).cornerRadius(16)
                 }
                 .disabled(!canSubmit)
             }
@@ -131,12 +130,10 @@ struct PostInputCard: View {
         .shadow(color: .black.opacity(0.1), radius: 20)
     }
     
-    var canSubmit: Bool {
-        return !viewModel.inputTitle.isEmpty
-    }
+    var canSubmit: Bool { !viewModel.inputTitle.isEmpty }
 }
 
-// MARK: - 3. 帖子详情卡片 (PostDetailCard) (回溯到单图)
+// MARK: - 3. 帖子详情卡片 (支持左右滑动多图)
 struct PostDetailCard: View {
     let post: Post
     var onDismiss: () -> Void
@@ -144,15 +141,25 @@ struct PostDetailCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             
-            // 1. 图片区域 (单图)
+            // ⚠️ 修改点：使用 TabView 实现图片轮播
             ZStack(alignment: .topTrailing) {
-                if let filename = post.imageFilename, // 检查单个文件名
-                   let image = DataManager.shared.loadImage(filename: filename) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(height: 300)
+                if !post.imageFilenames.isEmpty {
+                    TabView {
+                        ForEach(post.imageFilenames, id: \.self) { filename in
+                            if let image = DataManager.shared.loadImage(filename: filename) {
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(height: 300)
+                                    .clipped() // 确保图片不溢出
+                            }
+                        }
+                    }
+                    .frame(height: 300)
+                    .tabViewStyle(.page) // 启用分页圆点样式
+                    .indexViewStyle(.page(backgroundDisplayMode: .interactive))
                 } else {
+                    // 无图时的默认显示
                     Rectangle()
                         .fill(Color(post.color).gradient)
                         .frame(height: 200)
@@ -175,10 +182,10 @@ struct PostDetailCard: View {
                 .padding(16)
             }
             
-            // 2. 内容区域
+            // ... 下方文字内容保持不变 ...
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    HStack(spacing: 4) { // 分类标签
+                    HStack(spacing: 4) {
                         Image(systemName: post.icon)
                         Text(post.category.rawValue)
                     }
@@ -189,7 +196,6 @@ struct PostDetailCard: View {
                     .background(Capsule().fill(Color(post.color)))
                     
                     Spacer()
-                    
                     Text("Just now").font(.caption).foregroundStyle(.gray)
                 }
                 
@@ -200,7 +206,6 @@ struct PostDetailCard: View {
                 
                 Divider().padding(.vertical, 8)
                 
-                // 底部作者栏 (模拟)
                 HStack {
                     Circle().fill(Color(UIColor.secondarySystemBackground)).frame(width: 40, height: 40)
                         .overlay(Image(systemName: "person.fill").foregroundStyle(.gray))

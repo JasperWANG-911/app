@@ -22,15 +22,17 @@ class HomeViewModel {
     var isShowingInputSheet = false
     var activePost: Post? = nil
     
-    // 4. 表单输入状态 (回溯到单图支持)
+    // 表单输入状态
     var inputTitle = ""
     var inputCaption = ""
     var inputCategory: PostCategory = .food
     
-    // ✅ 回溯：使用单图属性
-    var selectedImage: UIImage?
-    var imageSelection: PhotosPickerItem? {
-        didSet { loadSelectedImage() }
+    // ⚠️ 修改点：支持多图选择
+    var selectedImages: [UIImage] = []
+    var imageSelections: [PhotosPickerItem] = [] {
+        didSet {
+            loadSelectedImages()
+        }
     }
     
     // 5. UI 反馈
@@ -88,66 +90,66 @@ class HomeViewModel {
     
     // 提交发布 (回溯到单图保存)
     func submitPost() {
-        guard let coord = selectedLocation else { return }
-        
-        let currentTitle = inputTitle
-        let currentCaption = inputCaption
-        let currentCategory = inputCategory
-        let imageToSave = selectedImage // 使用单图
-        
-        exitSelectionMode()
-        
-        Task(priority: .userInitiated) {
-            var finalFilename: String? = nil
+            guard let coord = selectedLocation else { return }
             
-            // 1. 保存单个图片
-            if let img = imageToSave {
-                let uniqueName = UUID().uuidString
-                finalFilename = DataManager.shared.saveImage(img, name: uniqueName)
+            let currentTitle = inputTitle
+            let currentCaption = inputCaption
+            let currentCategory = inputCategory
+            let imagesToSave = selectedImages // 获取当前选中的所有图片
+            
+            exitSelectionMode()
+            
+            Task(priority: .userInitiated) {
+                var savedFilenames: [String] = []
+                
+                // 循环保存每一张图片
+                for img in imagesToSave {
+                    let uniqueName = UUID().uuidString
+                    if let savedName = DataManager.shared.saveImage(img, name: uniqueName) {
+                        savedFilenames.append(savedName)
+                    }
+                }
+                
+                // 创建帖子
+                let newPost = Post(
+                    latitude: coord.latitude,
+                    longitude: coord.longitude,
+                    title: currentTitle,
+                    caption: currentCaption,
+                    category: currentCategory,
+                    rating: 0,
+                    imageFilenames: savedFilenames // 存入数组
+                )
+                
+                await MainActor.run {
+                    self.posts.append(newPost)
+                    DataManager.shared.savePosts(self.posts)
+                    let generator = UINotificationFeedbackGenerator()
+                    generator.notificationOccurred(.success)
+                }
             }
-            
-            // 2. 创建帖子数据
-            let newPost = Post(
-                latitude: coord.latitude,
-                longitude: coord.longitude,
-                title: currentTitle,
-                caption: currentCaption,
-                category: currentCategory,
-                rating: 0,
-                imageFilename: finalFilename // 使用单个文件名
-            )
-            
-            // 3. 回到主线程更新 UI 数据
-            await MainActor.run {
-                self.posts.append(newPost)
-                DataManager.shared.savePosts(self.posts)
-                let generator = UINotificationFeedbackGenerator()
-                generator.notificationOccurred(.success)
-            }
-        }
     }
     
     func cancelPost() { exitSelectionMode() }
     
     // 退出选点模式 & 重置表单
     func exitSelectionMode() {
-        withAnimation {
-            isSelectingMode = false
-            isShowingInputSheet = false
-            selectedLocation = nil
-            
-            // 清空单图表单
-            inputTitle = ""
-            inputCaption = ""
-            inputCategory = .food
-            selectedImage = nil
-            imageSelection = nil
-            
-            // 恢复浏览视角
-            if let userLoc = LocationManager.shared.userLocation {
-                cameraPosition = .region(MKCoordinateRegion(center: userLoc, span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)))
+            withAnimation {
+                isSelectingMode = false
+                isShowingInputSheet = false
+                selectedLocation = nil
+                
+                inputTitle = ""
+                inputCaption = ""
+                inputCategory = .food
+                
+                selectedImages = []     // 清空图片
+                imageSelections = []    // 清空选择器
+                
+                if let userLoc = LocationManager.shared.userLocation {
+                    cameraPosition = .region(MKCoordinateRegion(center: userLoc, span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)))
+                }
             }
-        }
     }
     
     func closePostDetail() {
@@ -172,17 +174,24 @@ class HomeViewModel {
     }
     
     // --- 辅助方法 (回溯到单图加载) ---
-    private func loadSelectedImage() {
-        selectedImage = nil
-        guard let item = imageSelection else { return }
-        
-        item.loadTransferable(type: Data.self) { result in
-            DispatchQueue.main.async {
-                if let data = try? result.get(), let uiImage = UIImage(data: data) {
-                    self.selectedImage = uiImage
+    private func loadSelectedImages() {
+            selectedImages = []
+            guard !imageSelections.isEmpty else { return }
+            
+            Task {
+                var loadedImages: [UIImage] = []
+                
+                for item in imageSelections {
+                    if let data = try? await item.loadTransferable(type: Data.self),
+                       let uiImage = UIImage(data: data) {
+                        loadedImages.append(uiImage)
+                    }
+                }
+                
+                await MainActor.run {
+                    self.selectedImages = loadedImages
                 }
             }
-        }
     }
     
     func updateUserProfile(_ newProfile: UserProfile) {

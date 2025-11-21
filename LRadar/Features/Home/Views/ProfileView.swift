@@ -2,13 +2,15 @@ import SwiftUI
 
 struct ProfileView: View {
     var viewModel: HomeViewModel
-    
-    // 状态控制
     @Binding var currentTab: Tab
     
+    // 状态控制
     @State private var isShowingEdit = false
     @State private var isShowingShare = false
     @State private var isShowingRatingDetail = false
+    
+    // 控制跳转到 All Drops 的状态
+    @State private var showAllDrops = false
     
     let columns = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
     
@@ -25,15 +27,24 @@ struct ProfileView: View {
                         onRatingTap: { isShowingRatingDetail = true }
                     )
                     
-                    // 2. 数据统计
-                    ProfileStatsView(postsCount: viewModel.posts.count)
+                    // 2. 数据统计 (这里调用了 onDropsTap)
+                    ProfileStatsView(
+                        postsCount: viewModel.posts.count,
+                        onDropsTap: {
+                            print("Drops stat tapped")
+                            showAllDrops = true
+                        }
+                    )
                     
                     Divider().padding(.horizontal)
                     
                     // 3. My Top Drops (预览区)
-                    VStack(alignment: .leading, spacing: 16) {
-                        // NavigationLink 引用 MyDropsListView (必须在单独文件里)
-                        NavigationLink(destination: MyDropsListView(viewModel: viewModel, currentTab: $currentTab)) {
+                    Button(action: {
+                        print("Tapped My Top Drops area")
+                        showAllDrops = true
+                    }) {
+                        VStack(alignment: .leading, spacing: 16) {
+                            // 3.1 标题栏
                             HStack {
                                 Text("My Top Drops").font(.headline).foregroundStyle(.black)
                                 Spacer()
@@ -41,39 +52,45 @@ struct ProfileView: View {
                                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(.gray)
                             }
                             .padding(.horizontal)
-                        }
-                        
-                        if viewModel.posts.isEmpty {
-                            EmptyStateView()
-                        } else {
-                            LazyVGrid(columns: columns, spacing: 2) {
-                                ForEach(viewModel.posts.prefix(6)) { post in
-                                    ZStack {
-                                        if let filename = post.imageFilename,
-                                           let image = DataManager.shared.loadImage(filename: filename) {
-                                            Image(uiImage: image)
-                                                .resizable().scaledToFill()
-                                                .frame(width: (UIScreen.main.bounds.width - 4) / 3, height: (UIScreen.main.bounds.width - 4) / 3)
-                                                .clipped()
-                                        } else {
-                                            Rectangle().fill(Color(post.color).gradient).aspectRatio(1, contentMode: .fit)
-                                            Image(systemName: post.icon).font(.title2).foregroundStyle(.white.opacity(0.8))
+                            
+                            // 3.2 内容网格
+                            if viewModel.posts.isEmpty {
+                                EmptyStateView()
+                            } else {
+                                LazyVGrid(columns: columns, spacing: 2) {
+                                    ForEach(viewModel.posts.prefix(6)) { post in
+                                        ZStack {
+                                            // 尝试加载第一张图
+                                            if let filename = post.imageFilenames.first,
+                                               let image = DataManager.shared.loadImage(filename: filename) {
+                                                Image(uiImage: image)
+                                                    .resizable().scaledToFill()
+                                                    .frame(width: (UIScreen.main.bounds.width - 4) / 3, height: (UIScreen.main.bounds.width - 4) / 3)
+                                                    .clipped()
+                                            } else {
+                                                // 无图时的占位
+                                                Rectangle().fill(Color(post.color).gradient)
+                                                    .frame(width: (UIScreen.main.bounds.width - 4) / 3, height: (UIScreen.main.bounds.width - 4) / 3)
+                                                    .overlay(
+                                                        Image(systemName: post.icon)
+                                                            .font(.title2)
+                                                            .foregroundStyle(.white.opacity(0.8))
+                                                    )
+                                            }
                                         }
-                                    }
-                                    .onTapGesture {
-                                        viewModel.jumpToPost(post)
-                                        currentTab = .map
+                                        .contentShape(Rectangle())
                                     }
                                 }
                             }
                         }
+                        .padding(.bottom, 100)
+                        .contentShape(Rectangle())
                     }
-                    .padding(.bottom, 100)
+                    .buttonStyle(.plain)
                 }
             }
             .background(Color.white)
             .navigationBarTitleDisplayMode(.inline)
-            // ... (Toolbar, Sheets, etc. 保持不变) ...
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -85,6 +102,11 @@ struct ProfileView: View {
                     }
                 }
             }
+            // ✅ 处理跳转逻辑
+            .navigationDestination(isPresented: $showAllDrops) {
+                MyDropsListView(viewModel: viewModel, currentTab: $currentTab)
+            }
+            // 其他弹窗
             .sheet(isPresented: $isShowingEdit) {
                 EditProfileView(profileCopy: viewModel.currentUser, onSave: { updatedProfile, newImage in
                     viewModel.updateUserProfile(updatedProfile)
@@ -104,8 +126,7 @@ struct ProfileView: View {
     }
 }
 
-// MARK: - 必须的子组件定义 (修复 Cannot find in scope 错误)
-// 这就是你刚才丢失的所有 struct
+// MARK: - 子组件 (关键是这里更新了 ProfileStatsView)
 
 struct ProfileHeaderView: View {
     var user: UserProfile
@@ -171,15 +192,32 @@ struct ProfileHeaderView: View {
     }
 }
 
+// ⚠️ 重点修复了这里：添加了 onDropsTap 属性
 struct ProfileStatsView: View {
     let postsCount: Int
+    var onDropsTap: () -> Void // 👈 之前你的代码里缺了这个
+    
     var body: some View {
         HStack(spacing: 0) {
-            StatUnit(value: "\(postsCount)", title: "Drops")
+            // Drops 区域 (可点击)
+            Button(action: onDropsTap) {
+                StatUnit(value: "\(postsCount)", title: "Drops")
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
             Divider().frame(height: 24)
+            
+            // Likes
             StatUnit(value: "1.2k", title: "Likes")
+                .frame(maxWidth: .infinity)
+            
             Divider().frame(height: 24)
+            
+            // Friends
             StatUnit(value: "342", title: "Friends")
+                .frame(maxWidth: .infinity)
         }
         .padding(.vertical, 12)
     }
@@ -256,8 +294,4 @@ struct ShareSheet: UIViewControllerRepresentable {
         UIActivityViewController(activityItems: items, applicationActivities: nil)
     }
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
-}
-
-#Preview {
-    ProfileView(viewModel: HomeViewModel(), currentTab: .constant(.profile))
 }
