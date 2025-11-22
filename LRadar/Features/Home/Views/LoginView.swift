@@ -6,10 +6,10 @@ struct LoginView: View {
     @State private var email = ""
     @State private var password = ""
     
-    // 🔥 新增：注册专用字段
-    @State private var inputName = ""      // 显示名称 (e.g. Jasper Wang)
-    @State private var inputUsername = ""  // 用户名/Handle (e.g. jasper_01)
-    @State private var inputMajor = ""     // 专业 (选填)
+    // 注册专用字段
+    @State private var inputName = ""
+    @State private var inputUsername = ""
+    @State private var inputMajor = ""
     
     @State private var isSignUpMode = false // 切换登录/注册模式
     @State private var errorMessage = ""
@@ -20,7 +20,7 @@ struct LoginView: View {
     var onLoginSuccess: () -> Void
     
     var body: some View {
-        ScrollView { // 改用 ScrollView 防止键盘遮挡
+        ScrollView {
             VStack(spacing: 20) {
                 // 1. 标题
                 Text(isSignUpMode ? "Create Account" : "Welcome Back")
@@ -28,37 +28,32 @@ struct LoginView: View {
                     .bold()
                     .padding(.bottom, 20)
                 
-                // 2. 注册专用输入框 (仅在注册模式显示)
+                // 2. 注册专用输入框
                 if isSignUpMode {
                     VStack(alignment: .leading, spacing: 12) {
-                        // Name
                         TextField("Display Name (e.g. Jasper Wang)", text: $inputName)
                             .textFieldStyle(.roundedBorder)
                             .autocorrectionDisabled()
                         
-                        // Username
                         VStack(alignment: .leading, spacing: 4) {
                             TextField("Username (e.g. jasper_911)", text: $inputUsername)
                                 .textFieldStyle(.roundedBorder)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
                                 .onChange(of: inputUsername) { _, newValue in
-                                    // 实时过滤非法字符 (只允许英文、数字、下划线)
                                     inputUsername = newValue.filter { $0.isLetter || $0.isNumber || $0 == "_" }
                                 }
-                            
                             Text("Only letters, numbers, and underscores allowed.")
                                 .font(.caption2).foregroundStyle(.gray)
                         }
                         
-                        // Major (选填)
                         TextField("Major (Optional)", text: $inputMajor)
                             .textFieldStyle(.roundedBorder)
                     }
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
                 
-                // 3. 通用输入框 (邮箱 & 密码)
+                // 3. 通用输入框
                 TextField("Email (must be .ac.uk for signup)", text: $email)
                     .textFieldStyle(.roundedBorder)
                     .textInputAutocapitalization(.never)
@@ -76,7 +71,6 @@ struct LoginView: View {
                     }
                 }
                 
-                // 忘记密码按钮 (仅在登录模式显示)
                 if !isSignUpMode {
                     HStack {
                         Spacer()
@@ -115,7 +109,7 @@ struct LoginView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .disabled(isButtonDisabled) // 使用计算属性判断
+                .disabled(isButtonDisabled)
                 
                 // 6. 切换模式按钮
                 Button(action: {
@@ -133,25 +127,19 @@ struct LoginView: View {
         }
     }
     
-    // 计算属性：判断按钮是否可用
     var isButtonDisabled: Bool {
         if isLoading || email.isEmpty || password.isEmpty { return true }
         if isSignUpMode {
-            // 注册模式下，Name 和 Username 也是必填的
             return inputName.isEmpty || inputUsername.isEmpty
         }
         return false
     }
     
-    // 正则校验 Username
     func isValidUsername(_ name: String) -> Bool {
-        // 允许：a-z, A-Z, 0-9, _
         let regex = "^[a-zA-Z0-9_]+$"
         return NSPredicate(format: "SELF MATCHES %@", regex).evaluate(with: name)
     }
     
-    // ... (inferUniversity 和 handlePasswordReset 方法保持不变，直接复用原代码) ...
-    // MARK: - 核心逻辑：大学名称自动推断
     func inferUniversity(from email: String) -> String {
         let lowerEmail = email.lowercased()
         let universityMapping: [String: String] = [
@@ -192,21 +180,17 @@ struct LoginView: View {
         errorMessage = ""
         successMessage = ""
         
-        // 基础校验
         if password.count < 6 {
             errorMessage = "Password must be at least 6 characters long."
             return
         }
         
         if isSignUpMode {
-            // 1. 邮箱后缀校验
             let lowercasedEmail = email.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
             if !lowercasedEmail.hasSuffix(".ac.uk") {
                 errorMessage = "Registration is restricted to university emails ending in .ac.uk"
                 return
             }
-            
-            // 2. Username 格式校验 (双重保险)
             if !isValidUsername(inputUsername) {
                 errorMessage = "Username can only contain letters, numbers, and underscores."
                 return
@@ -218,24 +202,32 @@ struct LoginView: View {
         if isSignUpMode {
             // --- 注册逻辑 ---
             Auth.auth().createUser(withEmail: email, password: password) { result, error in
-                if let error = error {
+                if let error = error as NSError? {
                     isLoading = false
-                    errorMessage = error.localizedDescription
+                    
+                    // 🔥 核心修改：捕获“邮箱已注册”错误
+                    if let errorCode = AuthErrorCode(rawValue: error.code), errorCode == .emailAlreadyInUse {
+                        withAnimation {
+                            errorMessage = "This email is already registered. Please Log In."
+                            // 可选：如果你希望自动帮用户切回登录模式，可以取消下面这行的注释
+                            // isSignUpMode = false
+                        }
+                    } else {
+                        errorMessage = error.localizedDescription
+                    }
+                    
                 } else if let user = result?.user {
                     print("✅ 账号注册成功！UID: \(user.uid)")
                     
                     let detectedSchool = inferUniversity(from: email)
-                    
-                    // 🔥 使用用户输入的数据创建 Profile
-                    // 如果 Major 没填，存为空字符串 ""，不再存 "Undeclared"
                     let finalMajor = inputMajor.isEmpty ? "" : inputMajor
                     
                     let newProfile = UserProfile(
                         id: user.uid,
-                        name: inputName,                // 用户输入的 Name
-                        handle: "@\(inputUsername)",    // 用户输入的 Username (自动加 @)
+                        name: inputName,
+                        handle: "@\(inputUsername)",
                         school: detectedSchool,
-                        major: finalMajor,              // 用户输入的 Major 或空
+                        major: finalMajor,
                         bio: "New to LRadar!",
                         avatarFilename: nil,
                         avatarURL: nil,
@@ -251,11 +243,12 @@ struct LoginView: View {
                 }
             }
         } else {
-            // --- 登录逻辑 (保持不变) ---
+            // --- 登录逻辑 ---
             Auth.auth().signIn(withEmail: email, password: password) { result, error in
                 isLoading = false
                 if let error = error {
-                    errorMessage = error.localizedDescription
+                    errorMessage = "Incorrect email or password." // 稍微优化了一下登录失败的文案
+                    // 也可以用 error.localizedDescription 查看具体原因
                 } else {
                     print("✅ 登录成功！")
                     onLoginSuccess()

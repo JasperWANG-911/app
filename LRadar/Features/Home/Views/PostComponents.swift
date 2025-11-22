@@ -221,13 +221,16 @@ struct PostDetailCard: View {
     var onDismiss: () -> Void
     var onLike: () -> Void
     var onDelete: () -> Void
-    var onReport: (String) -> Void
+    // 回调：返回 (举报类型, 详细描述)
+    var onReport: (String, String) -> Void
     
     @State private var showDeleteAlert = false
-    @State private var showReportAlert = false
+    @State private var showReportSheet = false // 🔥 控制新版举报弹窗
     @State private var showToast = false
     
-    // ... (辅助属性 timeAgo, isMyPost 保持不变) ...
+    // 🔥 新增：本地收藏状态 (UI演示用)
+    @State private var isBookmarked = false
+    
     private var timeAgo: String {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .full
@@ -243,7 +246,7 @@ struct PostDetailCard: View {
         ZStack(alignment: .bottom) {
             VStack(alignment: .leading, spacing: 0) {
                 
-                // --- 1. 图片轮播 (保持不变) ---
+                // --- 1. 图片轮播区域 ---
                 ZStack(alignment: .topTrailing) {
                     if !post.imageURLs.isEmpty {
                         TabView {
@@ -260,26 +263,28 @@ struct PostDetailCard: View {
                             .overlay(Image(systemName: post.icon).font(.system(size: 60)).foregroundStyle(.white.opacity(0.5)))
                     }
                     
-                    // ... (右上角关闭/删除按钮保持不变) ...
+                    // --- 顶部悬浮按钮组 (UI 优化) ---
                     HStack {
                         if isMyPost {
+                            // 作者本人：显示删除
                             Button(action: { showDeleteAlert = true }) {
                                 Image(systemName: "trash.fill")
                                     .font(.headline).foregroundStyle(.red)
                                     .padding(8).background(.white.opacity(0.8)).clipShape(Circle())
                             }
                         } else {
-                            Menu {
-                                Button(role: .destructive) { showReportAlert = true } label: {
-                                    Label("Report Post", systemImage: "exclamationmark.bubble")
-                                }
-                            } label: {
-                                Image(systemName: "ellipsis")
-                                    .font(.headline).foregroundStyle(.black)
+                            // 🔥 他人视角：左上角直接显示举报 (红色感叹号)
+                            // 与右上角的关闭按钮对称
+                            Button(action: { showReportSheet = true }) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.headline).foregroundStyle(.red)
                                     .padding(8).background(.white.opacity(0.8)).clipShape(Circle())
                             }
                         }
+                        
                         Spacer()
+                        
+                        // 关闭按钮
                         Button(action: onDismiss) {
                             Image(systemName: "xmark")
                                 .font(.headline).foregroundStyle(.black)
@@ -289,7 +294,7 @@ struct PostDetailCard: View {
                     .padding(16)
                 }
                 
-                // --- 2. 文字内容区域 (修改) ---
+                // --- 2. 文字内容区域 ---
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         HStack(spacing: 4) {
@@ -299,8 +304,6 @@ struct PostDetailCard: View {
                         .font(.caption.bold()).foregroundStyle(.white)
                         .padding(.vertical, 6).padding(.horizontal, 12)
                         .background(Capsule().fill(Color(post.color)))
-                        
-                        // ❌ 原来的 4.5分 星星展示 已删除
                         
                         Spacer()
                         Text(timeAgo).font(.caption).foregroundStyle(.gray)
@@ -312,10 +315,28 @@ struct PostDetailCard: View {
                     
                     Divider().padding(.vertical, 8)
                     
-                    // --- 3. 底部用户信息栏 (保持不变) ---
+                    // --- 3. 底部用户信息栏 (新增收藏) ---
                     HStack {
                         PostAuthorRow(userId: post.authorID)
+                        
                         Spacer()
+                        
+                        // 🔥 新增：收藏按钮 (在红心前面)
+                        Button(action: {
+                            let generator = UIImpactFeedbackGenerator(style: .light)
+                            generator.impactOccurred()
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                                isBookmarked.toggle()
+                            }
+                        }) {
+                            Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
+                                .font(.title2)
+                                .foregroundStyle(isBookmarked ? .orange : .black)
+                                .contentTransition(.symbolEffect(.replace))
+                        }
+                        .padding(.trailing, 16) // 与红心保持间距
+                        
+                        // 点赞按钮
                         Button(action: onLike) {
                             HStack(spacing: 6) {
                                 Image(systemName: post.isLiked ? "heart.fill" : "heart")
@@ -337,7 +358,7 @@ struct PostDetailCard: View {
             .padding(.bottom, 40)
             
             if showToast {
-                ToastView(message: "Report submitted.")
+                ToastView(message: "Report submitted. Thanks!")
                     .onAppear {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
                             withAnimation { showToast = false }
@@ -345,24 +366,26 @@ struct PostDetailCard: View {
                     }
             }
         }
-        // ... (Alert 和 ConfirmationDialog 保持不变)
         .alert("Delete this Drop?", isPresented: $showDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) { onDelete() }
         } message: {
             Text("This action cannot be undone.")
         }
-        .confirmationDialog("Report this post?", isPresented: $showReportAlert, titleVisibility: .visible) {
-            Button("Inappropriate Content", role: .destructive) { handleReport(reason: "Inappropriate Content") }
-            Button("Spam or Scam", role: .destructive) { handleReport(reason: "Spam or Scam") }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("Please select a reason.")
+        // 🔥 新版举报弹窗 (Sheet)
+        .sheet(isPresented: $showReportSheet) {
+            ReportSheetView { type, details in
+                handleReport(type: type, details: details)
+            }
+            .presentationDetents([.medium]) // 半屏高度
+            .presentationCornerRadius(24)
         }
     }
     
-    private func handleReport(reason: String) {
-        onReport(reason)
+    private func handleReport(type: String, details: String) {
+        // 组合原因字符串传给上层
+        let fullReason = "[\(type)] \(details)"
+        onReport(type, details) // 回调
         withAnimation { showToast = true }
     }
 }
@@ -386,5 +409,101 @@ struct CategoryPill: View {
             .foregroundStyle(isSelected ? .white : .gray)
             .clipShape(Capsule())
         }
+    }
+}
+
+// MARK: - 6. 新版举报弹窗 (UI 升级)
+struct ReportSheetView: View {
+    @Environment(\.dismiss) var dismiss
+    var onSubmit: (String, String) -> Void
+    
+    @State private var selectedType = "Spam or Scam"
+    @State private var description = ""
+    
+    let reportTypes = [
+        "Inappropriate Content",
+        "Spam or Scam",
+        "Harassment",
+        "False Information",
+        "Other"
+    ]
+    
+    var body: some View {
+        VStack(spacing: 24) {
+            // 顶部指示条
+            Capsule()
+                .fill(Color.gray.opacity(0.3))
+                .frame(width: 40, height: 5)
+                .padding(.top, 10)
+            
+            Text("Report Drop")
+                .font(.title3).bold()
+            
+            VStack(alignment: .leading, spacing: 20) {
+                // 1. 类型选择
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Reason").font(.caption).foregroundStyle(.gray).textCase(.uppercase)
+                    
+                    Menu {
+                        ForEach(reportTypes, id: \.self) { type in
+                            Button(type) { selectedType = type }
+                        }
+                    } label: {
+                        HStack {
+                            Text(selectedType)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption).foregroundStyle(.gray)
+                        }
+                        .padding()
+                        .background(Color(UIColor.secondarySystemBackground))
+                        .cornerRadius(12)
+                    }
+                }
+                
+                // 2. 详细描述 (限字数)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Details (Optional)").font(.caption).foregroundStyle(.gray).textCase(.uppercase)
+                        Spacer()
+                        Text("\(description.count)/100")
+                            .font(.caption)
+                            .foregroundStyle(description.count > 100 ? .red : .gray)
+                    }
+                    
+                    TextField("Please describe the issue...", text: $description, axis: .vertical)
+                        .lineLimit(3...5)
+                        .padding()
+                        .background(Color(UIColor.secondarySystemBackground))
+                        .cornerRadius(12)
+                        .onChange(of: description) { _, newValue in
+                            if newValue.count > 100 {
+                                description = String(newValue.prefix(100))
+                            }
+                        }
+                }
+            }
+            .padding(.horizontal)
+            
+            Spacer()
+            
+            // 3. 提交按钮
+            Button(action: {
+                onSubmit(selectedType, description)
+                dismiss()
+            }) {
+                Text("Submit Report")
+                    .bold()
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.red)
+                    .foregroundStyle(.white)
+                    .cornerRadius(16)
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 10)
+        }
+        .background(Color.white)
     }
 }
