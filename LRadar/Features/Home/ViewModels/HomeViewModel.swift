@@ -76,7 +76,41 @@ class HomeViewModel {
     var myTotalLikes: Int {
         myDrops.reduce(0) { $0 + $1.likeCount }
     }
-
+    
+    
+    // MARK: - 🔥 新增：收藏逻辑 (Bookmark)
+        // 本地持久化收藏的帖子ID
+        private var myBookmarkedPostIDs: Set<String> = [] {
+            didSet {
+                let array = Array(myBookmarkedPostIDs)
+                UserDefaults.standard.set(array, forKey: "MyBookmarkedPostIDs")
+            }
+        }
+        
+        // 计算属性：获取我收藏的所有帖子对象
+        var myBookmarkedPosts: [Post] {
+            posts.filter { myBookmarkedPostIDs.contains($0.id.uuidString) }
+                .sorted { $0.timestamp > $1.timestamp }
+        }
+        
+        // 判断某帖子是否已收藏
+        func isBookmarked(_ post: Post) -> Bool {
+            myBookmarkedPostIDs.contains(post.id.uuidString)
+        }
+        
+        // 切换收藏状态
+        func toggleBookmark(for post: Post) {
+            let id = post.id.uuidString
+            if myBookmarkedPostIDs.contains(id) {
+                myBookmarkedPostIDs.remove(id)
+            } else {
+                myBookmarkedPostIDs.insert(id)
+            }
+            let generator = UIImpactFeedbackGenerator(style: .light)
+            generator.impactOccurred()
+        }
+    
+    
     // MARK: - 初始化与析构
     init() {
         // 1. 加载本地点赞记录
@@ -292,6 +326,85 @@ class HomeViewModel {
             )
         }
     }
+    
+    // MARK: - 🔍 筛选相关状态 (Filter State)
+    // 1. 筛选枚举定义
+    enum TimeFilter: String, CaseIterable, Identifiable {
+        case all = "Anytime"
+        case today = "Last 24h"
+        case week = "Last 7d"
+        case month = "Last 30d"
+        var id: String { rawValue }
+    }
+    
+    enum DistanceFilter: Double, CaseIterable, Identifiable {
+        case one = 1000
+        case five = 5000
+        case ten = 10000
+        case unlimited = 0
+        
+        var id: Double { rawValue }
+        var title: String {
+            return self == .unlimited ? "Anywhere" : String(format: "%.0f km", rawValue / 1000)
+        }
+    }
+    
+    // 2. 筛选状态变量
+    var filterTime: TimeFilter = .all
+    var filterCategories: Set<PostCategory> = Set(PostCategory.allCases) // 默认全选
+    var filterDistance: DistanceFilter = .unlimited
+    var filterFriendsOnly: Bool = false
+    
+    // 3. 🔥 计算属性：过滤后的帖子 (地图实际上应该显示这个)
+    var filteredPosts: [Post] {
+        posts.filter { post in
+            // A. 时间筛选
+            let timeMatch: Bool
+            switch filterTime {
+            case .all: timeMatch = true
+            case .today: timeMatch = post.timestamp >= Calendar.current.date(byAdding: .hour, value: -24, to: Date())!
+            case .week: timeMatch = post.timestamp >= Calendar.current.date(byAdding: .day, value: -7, to: Date())!
+            case .month: timeMatch = post.timestamp >= Calendar.current.date(byAdding: .day, value: -30, to: Date())!
+            }
+            if !timeMatch { return false }
+            
+            // B. 分类筛选
+            if !filterCategories.contains(post.category) { return false }
+            
+            // C. 距离筛选
+            if filterDistance != .unlimited, let userLoc = LocationManager.shared.userLocation {
+                let postLoc = CLLocation(latitude: post.latitude, longitude: post.longitude)
+                let myLoc = CLLocation(latitude: userLoc.latitude, longitude: userLoc.longitude)
+                // distance(from:) 返回单位是米
+                if postLoc.distance(from: myLoc) > filterDistance.rawValue { return false }
+            }
+            
+            // D. 好友筛选 (暂时只作为占位，如果开启则什么都不显示，或者你可以改为 false)
+            if filterFriendsOnly {
+                // 暂时没有好友系统，所以如果开启了只看好友，暂时返回空，或者你可以改为 return false
+                // 这里为了演示不崩，先不做处理，后续有了好友名单再加逻辑
+            }
+            
+            return true
+        }
+    }
+    
+    // 4. 辅助方法
+    func toggleFilterCategory(_ category: PostCategory) {
+        if filterCategories.contains(category) {
+            filterCategories.remove(category)
+        } else {
+            filterCategories.insert(category)
+        }
+    }
+    
+    func resetFilters() {
+        filterTime = .all
+        filterCategories = Set(PostCategory.allCases)
+        filterDistance = .unlimited
+        filterFriendsOnly = false
+    }
+    
     
     // MARK: - 辅助方法
     

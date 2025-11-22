@@ -215,21 +215,21 @@ struct PostInputCard: View {
     var canSubmit: Bool { !viewModel.inputTitle.isEmpty }
 }
 
-// MARK: - 4. 帖子详情卡片 (修改：删除了评分展示)
+// MARK: - 4. 帖子详情卡片 (修正顶部按钮逻辑)
 struct PostDetailCard: View {
     let post: Post
     var onDismiss: () -> Void
     var onLike: () -> Void
     var onDelete: () -> Void
-    // 回调：返回 (举报类型, 详细描述)
     var onReport: (String, String) -> Void
     
-    @State private var showDeleteAlert = false
-    @State private var showReportSheet = false // 🔥 控制新版举报弹窗
-    @State private var showToast = false
+    // 收藏相关
+    var onBookmark: () -> Void
+    var isBookmarked: Bool
     
-    // 🔥 新增：本地收藏状态 (UI演示用)
-    @State private var isBookmarked = false
+    @State private var showDeleteAlert = false
+    @State private var showReportSheet = false
+    @State private var showToast = false
     
     private var timeAgo: String {
         let formatter = RelativeDateTimeFormatter()
@@ -263,18 +263,16 @@ struct PostDetailCard: View {
                             .overlay(Image(systemName: post.icon).font(.system(size: 60)).foregroundStyle(.white.opacity(0.5)))
                     }
                     
-                    // --- 顶部悬浮按钮组 (UI 优化) ---
+                    // --- 顶部悬浮按钮组 ---
                     HStack {
+                        // A. 左上角：功能按钮 (删除 或 举报)
                         if isMyPost {
-                            // 作者本人：显示删除
                             Button(action: { showDeleteAlert = true }) {
                                 Image(systemName: "trash.fill")
                                     .font(.headline).foregroundStyle(.red)
                                     .padding(8).background(.white.opacity(0.8)).clipShape(Circle())
                             }
                         } else {
-                            // 🔥 他人视角：左上角直接显示举报 (红色感叹号)
-                            // 与右上角的关闭按钮对称
                             Button(action: { showReportSheet = true }) {
                                 Image(systemName: "exclamationmark.triangle.fill")
                                     .font(.headline).foregroundStyle(.red)
@@ -284,9 +282,9 @@ struct PostDetailCard: View {
                         
                         Spacer()
                         
-                        // 关闭按钮
+                        // B. 右上角：关闭按钮 (始终是 X)
                         Button(action: onDismiss) {
-                            Image(systemName: "xmark")
+                            Image(systemName: "xmark") // ✅ 确认是关闭图标
                                 .font(.headline).foregroundStyle(.black)
                                 .padding(8).background(.white.opacity(0.8)).clipShape(Circle())
                         }
@@ -315,28 +313,22 @@ struct PostDetailCard: View {
                     
                     Divider().padding(.vertical, 8)
                     
-                    // --- 3. 底部用户信息栏 (新增收藏) ---
+                    // --- 3. 底部用户信息栏 ---
                     HStack {
                         PostAuthorRow(userId: post.authorID)
                         
                         Spacer()
                         
-                        // 🔥 新增：收藏按钮 (在红心前面)
-                        Button(action: {
-                            let generator = UIImpactFeedbackGenerator(style: .light)
-                            generator.impactOccurred()
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                                isBookmarked.toggle()
-                            }
-                        }) {
+                        // 收藏按钮 (Bookmarked)
+                        Button(action: onBookmark) {
                             Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
                                 .font(.title2)
                                 .foregroundStyle(isBookmarked ? .orange : .black)
                                 .contentTransition(.symbolEffect(.replace))
                         }
-                        .padding(.trailing, 16) // 与红心保持间距
+                        .padding(.trailing, 16)
                         
-                        // 点赞按钮
+                        // 点赞按钮 (Like)
                         Button(action: onLike) {
                             HStack(spacing: 6) {
                                 Image(systemName: post.isLiked ? "heart.fill" : "heart")
@@ -358,7 +350,7 @@ struct PostDetailCard: View {
             .padding(.bottom, 40)
             
             if showToast {
-                ToastView(message: "Report submitted. Thanks!")
+                ToastView(message: "Report submitted.")
                     .onAppear {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
                             withAnimation { showToast = false }
@@ -372,20 +364,18 @@ struct PostDetailCard: View {
         } message: {
             Text("This action cannot be undone.")
         }
-        // 🔥 新版举报弹窗 (Sheet)
         .sheet(isPresented: $showReportSheet) {
             ReportSheetView { type, details in
                 handleReport(type: type, details: details)
             }
-            .presentationDetents([.medium]) // 半屏高度
+            .presentationDetents([.medium])
             .presentationCornerRadius(24)
         }
     }
     
     private func handleReport(type: String, details: String) {
-        // 组合原因字符串传给上层
         let fullReason = "[\(type)] \(details)"
-        onReport(type, details) // 回调
+        onReport(type, details)
         withAnimation { showToast = true }
     }
 }

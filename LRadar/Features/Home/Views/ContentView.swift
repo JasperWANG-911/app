@@ -61,6 +61,7 @@ struct ContentView: View {
             }
             
             // --- 5. 帖子详情弹窗 ---
+            // --- 5. 帖子详情弹窗 ---
             if let post = viewModel.activePost {
                 Color.black.opacity(0.3).ignoresSafeArea()
                     .onTapGesture {
@@ -79,12 +80,14 @@ struct ContentView: View {
                         },
                         onLike: { viewModel.toggleLike(for: post) },
                         onDelete: { viewModel.deletePost(post) },
-                        // 🔥 修复点：这里现在接收两个参数 (type, details)
+                        // 举报回调
                         onReport: { type, details in
-                            // 将两个参数合并成一个字符串传给 ViewModel
                             let fullReason = "[\(type)] \(details)"
                             viewModel.reportPost(post, reason: fullReason)
-                        }
+                        },
+                        // 🔥【核心修复】补上这两个漏掉的参数
+                        onBookmark: { viewModel.toggleBookmark(for: post) },
+                        isBookmarked: viewModel.isBookmarked(post)
                     )
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
@@ -115,18 +118,11 @@ struct ContentView: View {
             }
         }
         // 🔥 绑定 Filter 弹窗
+        // 🔥🔥🔥🔥🔥 【就是这里！加在所有 onChange 的后面】 🔥🔥🔥🔥🔥
         .sheet(isPresented: $viewModel.showFilterSheet) {
-            VStack(spacing: 20) {
-                Capsule()
-                    .fill(Color.gray.opacity(0.3))
-                    .frame(width: 40, height: 5)
-                    .padding(.top, 10)
-                Text("Filter Options").font(.title2).bold()
-                Text("Categories, Time, Distance, etc.").foregroundStyle(.gray)
-                Spacer()
-            }
-            .presentationDetents([.medium])
-            .presentationCornerRadius(24)
+            FilterSheetView(viewModel: viewModel)
+                .presentationDetents([.height(580)]) // 固定高度，适合操作
+                .presentationCornerRadius(24)
         }
     }
     
@@ -143,7 +139,7 @@ struct ContentView: View {
                             .stroke(Color.purple.opacity(0.5), lineWidth: 1)
                     }
                     
-                    ForEach(viewModel.posts) { post in
+                    ForEach(viewModel.filteredPosts) { post in
                         Annotation("", coordinate: post.coordinate, anchor: .bottom) {
                             PostAnnotationView(color: post.color, icon: post.icon)
                         }
