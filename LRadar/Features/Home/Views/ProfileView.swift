@@ -183,7 +183,7 @@ struct ProfileHeaderView: View {
     var user: UserProfile
     var onEditTap: () -> Void
     var onShareTap: () -> Void
-    var onReputationTap: () -> Void // ✅ 改名
+    var onReputationTap: () -> Void
     
     var formattedHandle: String {
         let raw = user.handle.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -192,16 +192,14 @@ struct ProfileHeaderView: View {
     
     var body: some View {
         VStack(spacing: 16) {
+            // 1. 头像部分 (保持不变)
             Button(action: onEditTap) {
                 ZStack(alignment: .bottomTrailing) {
-                    // 头像逻辑 (保持不变)
                     if let avatarURL = user.avatarURL, let url = URL(string: avatarURL) {
                         AsyncImage(url: url) { phase in
                             if let image = phase.image {
                                 image.resizable().scaledToFill()
-                            } else {
-                                Color.gray.opacity(0.1)
-                            }
+                            } else { Color.gray.opacity(0.1) }
                         }
                         .frame(width: 96, height: 96).clipShape(Circle())
                         .overlay(Circle().stroke(Color.white, lineWidth: 4))
@@ -219,38 +217,60 @@ struct ProfileHeaderView: View {
                             .overlay(Circle().stroke(Color.white, lineWidth: 4))
                     }
                     
-                    // 🔥 核心修改：声望勋章按钮
+                    // 声望勋章
                     Button(action: onReputationTap) {
                         HStack(spacing: 4) {
                             Image(systemName: "trophy.fill").font(.caption2).foregroundStyle(.yellow)
-                            // 显示分数
                             Text("\(user.reputation)").font(.caption).bold().foregroundStyle(.white).monospacedDigit()
-                            // 显示头衔
                             Text("• \(user.rankTitle)").font(.caption2).bold().foregroundStyle(.white.opacity(0.9))
-                            
                             Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.gray)
                         }
                         .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(Capsule().fill(.black))
                         .overlay(Capsule().stroke(Color.white, lineWidth: 2))
                     }
-                    .offset(x: 20, y: 5) // 位置稍微调整一下以适应更宽的胶囊
+                    .offset(x: 20, y: 5)
                 }
             }.buttonStyle(.plain)
             
+            // 2. 文字信息部分 (🔥 修改了这里)
             VStack(spacing: 6) {
+                // 名字和 Handle
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(user.name).font(.title2).bold().foregroundStyle(.black)
                     Text(formattedHandle).font(.subheadline).foregroundStyle(.gray)
                 }
-                HStack(spacing: 4) {
-                    Image(systemName: "graduationcap.fill").font(.caption).foregroundStyle(.gray)
-                    Text("\(user.school) · \(user.major)").font(.subheadline).foregroundStyle(.gray)
+                
+                // 🔥 将学校和专业拆分开，并增加空值判断
+                VStack(spacing: 4) {
+                    // 第一行：学校 (必显)
+                    HStack(spacing: 6) {
+                        Image(systemName: "graduationcap.fill")
+                            .font(.caption).foregroundStyle(.purple) // 给个颜色区分
+                        Text(user.school)
+                            .font(.subheadline).fontWeight(.medium)
+                            .foregroundStyle(.primary)
+                    }
+                    
+                    // 第二行：专业 (选显)
+                    // 只有当 major 不为空字符串时才显示
+                    if !user.major.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "book.fill")
+                                .font(.caption).foregroundStyle(.gray)
+                            Text(user.major)
+                                .font(.subheadline).foregroundStyle(.gray)
+                        }
+                    }
                 }
+                .padding(.top, 2)
+                
+                // Bio
                 Text(user.bio).font(.footnote).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center).padding(.horizontal, 40).padding(.top, 4)
             }
             
+            // 按钮组 (保持不变)
             HStack(spacing: 12) {
                 Button(action: onEditTap) {
                     Text("Edit Profile").font(.subheadline.bold()).frame(maxWidth: .infinity).padding(.vertical, 8)

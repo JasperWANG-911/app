@@ -404,7 +404,6 @@ class HomeViewModel {
         let userPosts = self.posts.filter { $0.authorID == userID }
         
         // 2. 异步删除所有帖子 (Firestore + Storage)
-        // 这里我们利用已有的 deletePostFromCloud 方法
         for post in userPosts {
             DataManager.shared.deletePostFromCloud(post: post)
         }
@@ -420,14 +419,16 @@ class HomeViewModel {
         }
         
         // 4. 删除 Firebase Auth 账户
-        // 注意：这步必须最后做，否则删了 Auth 就没权限删数据了
+        // 🔥 关键修复：包裹在 DispatchQueue.main.async 中
         user.delete { error in
-            if let error = error {
-                print("❌ 删除 Auth 账户失败 (可能需要重登): \(error.localizedDescription)")
-                completion(false)
-            } else {
-                print("✅ Auth 账户已彻底删除")
-                completion(true)
+            DispatchQueue.main.async {
+                if let error = error {
+                    print("❌ 删除 Auth 账户失败 (可能需要重登): \(error.localizedDescription)")
+                    completion(false)
+                } else {
+                    print("✅ Auth 账户已彻底删除")
+                    completion(true) // 这里的回调现在会安全地触发 UI 刷新
+                }
             }
         }
     }

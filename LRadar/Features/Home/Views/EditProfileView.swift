@@ -1,6 +1,9 @@
 import SwiftUI
 import PhotosUI
 
+import SwiftUI
+import PhotosUI
+
 struct EditProfileView: View {
     @State var profileCopy: UserProfile
     // 回调：同时返回修改后的 Profile 和 新选的图片(如果有)
@@ -26,7 +29,7 @@ struct EditProfileView: View {
                                         .resizable().scaledToFill()
                                         .frame(width: 100, height: 100).clipShape(Circle())
                                 }
-                                // B. 其次显示云端 URL (新增逻辑)
+                                // B. 其次显示云端 URL
                                 else if let avatarURL = profileCopy.avatarURL, let url = URL(string: avatarURL) {
                                     AsyncImage(url: url) { image in
                                         image.resizable().scaledToFill()
@@ -59,8 +62,29 @@ struct EditProfileView: View {
                     
                     // 2. 表单区域
                     VStack(alignment: .leading, spacing: 20) {
-                        InputGroup(title: "Name", text: $profileCopy.name)
-                        InputGroup(title: "Username", text: $profileCopy.handle)
+                        // Name
+                        InputGroup(title: "Display Name (Required)", text: $profileCopy.name)
+                        
+                        // Handle (Username) - 包含特殊校验逻辑，所以单独写
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Username (Required)").font(.caption).foregroundStyle(.gray)
+                            TextField("@username", text: $profileCopy.handle)
+                                .padding(12)
+                                .background(Color(UIColor.secondarySystemBackground)).cornerRadius(12)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .onChange(of: profileCopy.handle) { _, newValue in
+                                    // 1. 过滤非法字符
+                                    var filtered = newValue.filter { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "@" }
+                                    // 2. 确保 @ 始终在开头
+                                    if !filtered.hasPrefix("@") {
+                                        filtered = "@" + filtered.replacingOccurrences(of: "@", with: "")
+                                    }
+                                    profileCopy.handle = filtered
+                                }
+                            Text("Only letters, numbers, and underscores allowed.")
+                                .font(.caption2).foregroundStyle(.gray)
+                        }
                         
                         // 学校 (不可编辑)
                         VStack(alignment: .leading, spacing: 8) {
@@ -74,7 +98,10 @@ struct EditProfileView: View {
                             .padding(12).background(Color(UIColor.secondarySystemBackground).opacity(0.5)).cornerRadius(12)
                         }
                         
-                        InputGroup(title: "Major", text: $profileCopy.major)
+                        // Major
+                        InputGroup(title: "Major (Optional)", text: $profileCopy.major)
+                        
+                        // Bio
                         InputGroup(title: "Bio", text: $profileCopy.bio, isMultiLine: true)
                     }
                     .padding(.horizontal)
@@ -92,6 +119,8 @@ struct EditProfileView: View {
                         dismiss()
                     }
                     .bold().foregroundStyle(.black)
+                    // 校验：名字不能为空，Handle 至少要有 @ + 1 个字符
+                    .disabled(profileCopy.name.isEmpty || profileCopy.handle.count < 2)
                 }
             }
             // 处理图片选择
@@ -107,6 +136,7 @@ struct EditProfileView: View {
     }
 }
 
+// MARK: - 辅助组件：输入框组
 struct InputGroup: View {
     let title: String
     @Binding var text: String
